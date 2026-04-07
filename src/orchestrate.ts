@@ -19,7 +19,9 @@ import {
 import { generateIndex } from "./indexer"
 import { createProviders } from "./providers"
 import type { LLMProvider, ProviderConfig } from "./providers/types"
+import type { GatherResult } from "./sources"
 import { gatherFullSource } from "./sources"
+import { validateCompiledOutput } from "./validate-output"
 import { appendCompilationLog, generateWiki } from "./wiki"
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -42,7 +44,13 @@ export type OrchestrateResult = {
 // ── Style guide ───────────────────────────────────────────────────────
 
 const DEFAULT_STYLE = `
-Write for a non-technical audience (PMs, designers). Explain WHAT the system does, not HOW.
+Write for a mixed audience — engineers, PMs, designers, and new hires should all find value.
+
+CONTENT BALANCE:
+- Lead with WHAT the system does and WHY — features, user flows, business rules, data relationships, screens, behaviors
+- Include HOW it's built — architecture, key technical decisions, dependencies, infrastructure — but keep it concise
+- Tooling (linters, bundlers, CI) deserves a brief mention for engineer onboarding, not deep coverage
+- Every section should answer: "What would someone new to this project need to know?"
 
 FRONTMATTER: Every doc MUST start with YAML frontmatter containing these fields:
 \`\`\`yaml
@@ -80,6 +88,10 @@ CITATIONS: When stating a specific fact, behavior, or rule derived from the sour
 `.trim()
 
 // ── Prompts ────────────────────────────────────────────────────────────
+
+function noSourcesMessage(entry: DocEntry): string {
+  return `No source files found for sources: ${entry.sources.join(", ")}. Check that these directories exist.`
+}
 
 function recompilePrompt(
   entry: DocEntry,
@@ -297,6 +309,9 @@ export async function orchestrate(
   }
   const providers = createProviders(options.provider)
   const styleGuide = docMap.style ?? DEFAULT_STYLE
+  const singlePass =
+    options.provider.provider === "local" ||
+    options.provider.provider === "ollama"
 
   const lastSync = getLastSyncCommit(config.lastSyncPath, repoRoot)
   const currentCommit = getCurrentCommit(repoRoot)
@@ -392,19 +407,37 @@ export async function orchestrate(
         currentDoc,
         repoRoot,
         styleGuide,
+        singlePass,
         providers.triage,
         providers.compile,
       )
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
-      writeFileSync(fullDocPath, updated)
-      result.updatedDocs.push(docPath)
-      result.docDiffs.push({ doc: docPath, before: currentDoc, after: updated })
-      result.triageResults.push({
-        doc: docPath,
-        drifted: true,
-        reason: "Force recompile",
-      })
+      const validation = validateCompiledOutput(updated)
+      if (validation.warnings.length > 0) {
+        for (const w of validation.warnings) console.log(`   ⚠  ${w}`)
+      }
+      if (!validation.valid) {
+        console.log(`${progress} ✗ ${docPath} — rejected (invalid output)`)
+        result.triageResults.push({
+          doc: docPath,
+          drifted: true,
+          reason: `Rejected: ${validation.warnings[0]}`,
+        })
+      } else {
+        console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
+        writeFileSync(fullDocPath, `${validation.cleaned}\n`)
+        result.updatedDocs.push(docPath)
+        result.docDiffs.push({
+          doc: docPath,
+          before: currentDoc,
+          after: validation.cleaned,
+        })
+        result.triageResults.push({
+          doc: docPath,
+          drifted: true,
+          reason: "Force recompile",
+        })
+      }
       allHashes = updateHashesForDoc(allHashes, docPath, currentHashes)
     } else {
       // Diff-only recompile: send previous doc + git diff (not full source)
@@ -424,19 +457,32 @@ export async function orchestrate(
         providers.compile,
       )
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
-      writeFileSync(fullDocPath, updated)
-      result.updatedDocs.push(docPath)
-      result.docDiffs.push({
-        doc: docPath,
-        before: currentDoc,
-        after: updated,
-      })
-      result.triageResults.push({
-        doc: docPath,
-        drifted: true,
-        reason: `${nChanged} file(s) changed`,
-      })
+      const validation = validateCompiledOutput(updated)
+      if (validation.warnings.length > 0) {
+        for (const w of validation.warnings) console.log(`   ⚠  ${w}`)
+      }
+      if (!validation.valid) {
+        console.log(`${progress} ✗ ${docPath} — rejected (invalid output)`)
+        result.triageResults.push({
+          doc: docPath,
+          drifted: true,
+          reason: `Rejected: ${validation.warnings[0]}`,
+        })
+      } else {
+        console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
+        writeFileSync(fullDocPath, `${validation.cleaned}\n`)
+        result.updatedDocs.push(docPath)
+        result.docDiffs.push({
+          doc: docPath,
+          before: currentDoc,
+          after: validation.cleaned,
+        })
+        result.triageResults.push({
+          doc: docPath,
+          drifted: true,
+          reason: `${nChanged} file(s) changed`,
+        })
+      }
       allHashes = updateHashesForDoc(allHashes, docPath, currentHashes)
     }
   }
@@ -505,33 +551,89 @@ async function runDiffRecompile(
   return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
 }
 
+function logGatherReport(gather: GatherResult): void {
+  const sizeKb = Math.round(gather.totalSize / 1024)
+  console.log(
+    `   📂 ${gather.fileCount} files read (${sizeKb}KB)${gather.skippedByPriority > 0 ? `, ${gather.skippedByPriority} skipped (cap)` : ""}`,
+  )
+  if (gather.truncatedFiles.length > 0) {
+    console.log(
+      `   ⚠  ${gather.truncatedFiles.length} file(s) truncated: ${gather.truncatedFiles.slice(0, 3).join(", ")}${gather.truncatedFiles.length > 3 ? "..." : ""}`,
+    )
+  }
+}
+
+function singlePassPrompt(
+  entry: DocEntry,
+  currentDoc: string,
+  sourceCode: string,
+  style: string,
+  authorContext: string,
+): string {
+  const timestamp = new Date().toISOString()
+  return [
+    "You are a documentation compiler. Write a complete document from the source code.",
+    "Return ONLY the markdown content — no preamble, no code fences wrapping the output.",
+    "",
+    style,
+    "",
+    `## Document description`,
+    entry.description,
+    `Sources: ${entry.sources.join(", ")}`,
+    `Timestamp: ${timestamp}`,
+    "",
+    `## Current documentation (for structural reference)`,
+    currentDoc || "(new document — create from scratch)",
+    "",
+    `## Source code`,
+    sourceCode,
+    authorContext,
+  ].join("\n")
+}
+
 async function runFullRecompile(
   entry: DocEntry,
   currentDoc: string,
   repoRoot: string,
   style: string,
+  singlePass: boolean,
   triageProvider: LLMProvider,
   compileProvider: LLMProvider,
 ): Promise<string> {
-  const sourceCode = gatherFullSource(entry, repoRoot)
-  if (!sourceCode.trim()) {
-    throw new Error(
-      `No source files found for sources: ${entry.sources.join(", ")}. Check that these directories exist.`,
-    )
+  const gather = gatherFullSource(entry, repoRoot)
+  if (gather.content === "") {
+    throw new Error(noSourcesMessage(entry))
   }
-  const summaryPrompt = summarizeSourcePrompt(entry, sourceCode)
-  const summary = await triageProvider.generate(summaryPrompt)
+  logGatherReport(gather)
 
   const contributors = getDirectoryAuthors(entry.sources, repoRoot)
   const authorContext = formatAuthorContext(contributors)
-  const prompt = fullRecompilePrompt(
-    entry,
-    currentDoc,
-    summary,
-    style,
-    authorContext,
-  )
-  const result = await compileProvider.generate(prompt)
+
+  let result: string
+  if (singlePass) {
+    // Single LLM call: source → doc (for local/ollama where triage = compile)
+    const prompt = singlePassPrompt(
+      entry,
+      currentDoc,
+      gather.content,
+      style,
+      authorContext,
+    )
+    result = await compileProvider.generate(prompt)
+  } else {
+    // Two-pass: source → summary → doc (for cloud providers with fast triage model)
+    const summaryPrompt = summarizeSourcePrompt(entry, gather.content)
+    const summary = await triageProvider.generate(summaryPrompt)
+    const prompt = fullRecompilePrompt(
+      entry,
+      currentDoc,
+      summary,
+      style,
+      authorContext,
+    )
+    result = await compileProvider.generate(prompt)
+  }
+
   return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
 }
 
@@ -541,11 +643,12 @@ async function runHealthCheck(
   repoRoot: string,
   triageProvider: LLMProvider,
 ): Promise<string[]> {
-  const sourceCode = gatherFullSource(entry, repoRoot)
-  if (!sourceCode.trim()) {
-    return [`No source files found for sources: ${entry.sources.join(", ")}`]
+  const gather = gatherFullSource(entry, repoRoot)
+  if (gather.content === "") {
+    return [noSourcesMessage(entry)]
   }
-  const prompt = healthCheckPrompt(entry, currentDoc, sourceCode)
+  logGatherReport(gather)
+  const prompt = healthCheckPrompt(entry, currentDoc, gather.content)
   const raw = await triageProvider.generate(prompt)
   const { healthy, issues } = parseHealthResponse(raw)
   return healthy ? [] : issues

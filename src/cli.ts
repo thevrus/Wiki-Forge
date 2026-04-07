@@ -158,6 +158,138 @@ function resolveApiKey(provider: string, explicit: string | undefined): string {
   return key
 }
 
+function detectSourceDirs(repo: string): string[] {
+  const { existsSync, readdirSync, statSync } =
+    require("node:fs") as typeof import("node:fs")
+
+  // Common source directory names, ordered by priority
+  const candidates = [
+    "src",
+    "lib",
+    "app",
+    "apps",
+    "packages",
+    "services",
+    "server",
+    "client",
+    "api",
+    "core",
+    "modules",
+    "components",
+  ]
+
+  const sourceExts = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".py",
+    ".go",
+    ".rs",
+    ".rb",
+    ".java",
+    ".swift",
+    ".kt",
+  ])
+
+  const found: string[] = []
+
+  for (const dir of candidates) {
+    const full = `${repo}/${dir}`
+    if (existsSync(full) && statSync(full).isDirectory()) {
+      found.push(`${dir}/`)
+    }
+  }
+
+  // If nothing matched, scan top-level for any directory containing source files
+  if (found.length === 0) {
+    const entries = readdirSync(repo, { withFileTypes: true })
+    for (const entry of entries) {
+      if (
+        !entry.isDirectory() ||
+        entry.name.startsWith(".") ||
+        entry.name === "node_modules" ||
+        entry.name === "docs" ||
+        entry.name === "brain" ||
+        entry.name === "dist" ||
+        entry.name === "build" ||
+        entry.name === "vendor"
+      )
+        continue
+
+      // Check if this directory has source files
+      try {
+        const files = readdirSync(`${repo}/${entry.name}`)
+        const hasSource = files.some((f: string) => {
+          const ext = f.slice(f.lastIndexOf("."))
+          return sourceExts.has(ext)
+        })
+        if (hasSource) found.push(`${entry.name}/`)
+      } catch {
+        // skip unreadable
+      }
+    }
+  }
+
+  return found.length > 0 ? found : ["src/"]
+}
+
+function detectWorkspacePackages(
+  repo: string,
+): Array<{ name: string; path: string }> {
+  const { existsSync, readdirSync, readFileSync, statSync } =
+    require("node:fs") as typeof import("node:fs")
+
+  const workspaceDirs = ["apps", "packages", "services"]
+  const packages: Array<{ name: string; path: string }> = []
+
+  for (const dir of workspaceDirs) {
+    const full = `${repo}/${dir}`
+    if (!existsSync(full) || !statSync(full).isDirectory()) continue
+
+    const entries = readdirSync(full, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue
+      const pkgPath = `${full}/${entry.name}`
+
+      // Check for package.json or source files to confirm it's a real package
+      const hasPkgJson = existsSync(`${pkgPath}/package.json`)
+      if (hasPkgJson) {
+        try {
+          const raw = readFileSync(`${pkgPath}/package.json`, "utf-8")
+          const pkg = JSON.parse(raw)
+          packages.push({
+            name: pkg.name ?? entry.name,
+            path: `${dir}/${entry.name}/`,
+          })
+        } catch {
+          packages.push({ name: entry.name, path: `${dir}/${entry.name}/` })
+        }
+      } else {
+        // No package.json but has source files — include anyway
+        try {
+          const files = readdirSync(pkgPath)
+          const hasSource = files.some(
+            (f: string) =>
+              f.endsWith(".ts") ||
+              f.endsWith(".tsx") ||
+              f.endsWith(".js") ||
+              f.endsWith(".py") ||
+              f.endsWith(".go"),
+          )
+          if (hasSource) {
+            packages.push({ name: entry.name, path: `${dir}/${entry.name}/` })
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+
+  return packages
+}
+
 async function runInit(repo: string, customDocsDir?: string) {
   const { mkdirSync, writeFileSync, existsSync } = await import("node:fs")
   const dirName = customDocsDir ?? "docs"
@@ -171,20 +303,65 @@ async function runInit(repo: string, customDocsDir?: string) {
 
   mkdirSync(docsDir, { recursive: true })
 
-  const example = {
-    docs: {
-      "ARCHITECTURE.md": {
-        description:
-          "High-level system architecture: services, data flow, and infrastructure",
+  const contextFiles = existsSync(`${repo}/package.json`)
+    ? ["package.json"]
+    : []
+
+  // Check for monorepo workspace packages
+  const workspaces = detectWorkspacePackages(repo)
+
+  const docs: Record<
+    string,
+    {
+      description: string
+      type: string
+      sources: string[]
+      context_files: string[]
+    }
+  > = {}
+
+  if (workspaces.length > 1) {
+    // Monorepo: one doc per workspace package + one overview
+    const allSources = detectSourceDirs(repo)
+    docs["ARCHITECTURE.md"] = {
+      description:
+        "Monorepo overview: workspace structure, shared dependencies, and cross-package data flow",
+      type: "compiled",
+      sources: allSources,
+      context_files: contextFiles,
+    }
+
+    for (const pkg of workspaces) {
+      const slug = pkg.name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-")
+      docs[`${slug.toUpperCase()}.md`] = {
+        description: `${pkg.name}: features, API, data flow, and business rules`,
         type: "compiled",
-        sources: ["src/"],
-        context_files: ["package.json"],
-      },
-    },
+        sources: [pkg.path],
+        context_files: contextFiles,
+      }
+    }
+
+    console.log(`📚 Created ${dirName}/.doc-map.json (monorepo detected)`)
+    console.log(`   ${workspaces.length} workspace packages found:`)
+    for (const pkg of workspaces) {
+      console.log(`     ${pkg.name} → ${pkg.path}`)
+    }
+  } else {
+    // Single project: one doc
+    const sources = detectSourceDirs(repo)
+    docs["ARCHITECTURE.md"] = {
+      description:
+        "High-level system architecture: services, data flow, and infrastructure",
+      type: "compiled",
+      sources,
+      context_files: contextFiles,
+    }
+
+    console.log(`📚 Created ${dirName}/.doc-map.json`)
+    console.log(`   Detected sources: ${sources.join(", ")}`)
   }
 
-  writeFileSync(docMapPath, `${JSON.stringify(example, null, 2)}\n`)
-  console.log(`📚 Created ${dirName}/.doc-map.json with an example entry.`)
+  writeFileSync(docMapPath, `${JSON.stringify({ docs }, null, 2)}\n`)
   console.log("   Edit the doc map, then run: wiki-forge compile")
 }
 

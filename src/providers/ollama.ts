@@ -1,6 +1,7 @@
 import type { LLMProvider, ProviderConfig } from "./types"
 
 const DEFAULT_BASE_URL = "http://localhost:11434"
+const TIMEOUT_MINUTES = 10
 
 export function createOllamaProvider(config: ProviderConfig): {
   triage: LLMProvider
@@ -13,11 +14,11 @@ export function createOllamaProvider(config: ProviderConfig): {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(10 * 60 * 1000), // 10 minutes
+        signal: AbortSignal.timeout(TIMEOUT_MINUTES * 60 * 1000),
         body: JSON.stringify({
           model,
           stream: false,
-          keep_alive: "10m",
+          keep_alive: `${TIMEOUT_MINUTES}m`,
           options: { temperature: 0.1 },
           messages: [
             ...(system ? [{ role: "system", content: system }] : []),

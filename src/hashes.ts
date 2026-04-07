@@ -37,6 +37,25 @@ export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16)
 }
 
+const SOURCE_EXTENSIONS = [
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "json",
+  "py",
+  "go",
+  "rs",
+  "rb",
+  "java",
+  "swift",
+  "kt",
+]
+
+const FIND_EXTENSIONS = SOURCE_EXTENSIONS.map((ext) => `-name "*.${ext}"`).join(
+  " -o ",
+)
+
 function listSourceFiles(patterns: string[], repoRoot: string): string[] {
   const allFiles: string[] = []
   const trailingGlob = /[/*]+$/
@@ -45,7 +64,7 @@ function listSourceFiles(patterns: string[], repoRoot: string): string[] {
     const searchDir = pattern.replace(trailingGlob, "")
     try {
       const output = execSync(
-        `find ${searchDir} -type f \\( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.py" -o -name "*.go" -o -name "*.rs" -o -name "*.rb" -o -name "*.java" -o -name "*.swift" -o -name "*.kt" \\) | sort`,
+        `find ${searchDir} -type f \\( ${FIND_EXTENSIONS} \\) | sort`,
         { encoding: "utf-8", cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
       ).trim()
       if (output) {
