@@ -13,7 +13,7 @@ export function createGeminiProvider(config: ProviderConfig): {
         model,
         contents: prompt,
         config: {
-          temperature: 0.1,
+          temperature: 0,
           maxOutputTokens: 65536,
           ...(system ? { systemInstruction: system } : {}),
         },

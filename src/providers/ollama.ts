@@ -19,7 +19,7 @@ export function createOllamaProvider(config: ProviderConfig): {
           model,
           stream: false,
           keep_alive: `${TIMEOUT_MINUTES}m`,
-          options: { temperature: 0.1 },
+          options: { temperature: 0 },
           messages: [
             ...(system ? [{ role: "system", content: system }] : []),
             { role: "user", content: prompt },

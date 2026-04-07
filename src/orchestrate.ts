@@ -45,6 +45,13 @@ export type OrchestrateResult = {
 // ── Style guide ───────────────────────────────────────────────────────
 
 const DEFAULT_STYLE = `
+ACCURACY RULES (non-negotiable):
+- ONLY state facts that are directly observable in the provided source code.
+- NEVER guess, infer, or assume functionality that isn't in the code. If you're unsure, say "unclear from source" or omit the claim.
+- NEVER invent feature names, API endpoints, data fields, or behaviors. Every claim must be traceable to specific source code.
+- If the source code is insufficient to describe a section, write "[Insufficient source data]" instead of guessing.
+- Precision over completeness. A short, accurate doc is infinitely better than a long, hallucinated one.
+
 Write for a mixed audience — engineers, PMs, designers, and new hires should all find value.
 
 CONTENT BALANCE:
@@ -105,6 +112,7 @@ function recompilePrompt(
   const timestamp = new Date().toISOString()
   return [
     "You are a documentation compiler. Update the existing document to reflect the code changes.",
+    "ONLY state facts directly visible in the source code or diff. NEVER guess or infer behavior not shown.",
     "Preserve the document's structure. Only modify sections affected by the changes.",
     "Update the compiled_at timestamp in frontmatter. Preserve all other frontmatter fields (title, slug, category, icon, contributors).",
     "Return ONLY the updated markdown content — no preamble, no fencing.",
@@ -131,9 +139,10 @@ function recompilePrompt(
 function summarizeSourcePrompt(entry: DocEntry, sourceCode: string): string {
   return [
     "You are a code analyst preparing a structured fact sheet for a documentation compiler.",
-    "The documentation is written for product managers and designers — not engineers.",
+    "CRITICAL: ONLY extract facts that are directly visible in the source code. NEVER infer, guess, or assume.",
+    "If something is unclear from the source, mark it as '[unclear from source]' — do NOT fill in the gap with assumptions.",
     "",
-    "Extract and organize:",
+    "Extract and organize (ONLY what is present in the code):",
     "- Features and capabilities (what can users do?)",
     "- Business rules, validation, limits, pricing",
     "- User flows and state transitions",
@@ -143,7 +152,7 @@ function summarizeSourcePrompt(entry: DocEntry, sourceCode: string): string {
     "- Configuration and defaults",
     "",
     "Be thorough and specific. Name concrete things. State numbers and defaults.",
-    "Output as structured bullet points grouped by topic.",
+    "Every fact must be traceable to the source code provided. Output as structured bullet points grouped by topic.",
     "",
     `## Document to be written`,
     entry.description,
@@ -163,6 +172,7 @@ function fullRecompilePrompt(
   const timestamp = new Date().toISOString()
   return [
     "You are a documentation compiler. Write a complete document from the source code summary.",
+    "ONLY include facts from the summary. NEVER add information not present in the summary. If a section would be empty, write '[Insufficient source data]'.",
     "Return ONLY the markdown content — no preamble, no fencing.",
     "",
     style,
@@ -584,6 +594,7 @@ function singlePassPrompt(
   const timestamp = new Date().toISOString()
   return [
     "You are a documentation compiler. Write a complete document from the source code.",
+    "ONLY state facts directly visible in the provided source code. NEVER guess, infer, or assume. If unsure, write '[Insufficient source data]'.",
     "Return ONLY the markdown content — no preamble, no code fences wrapping the output.",
     "",
     style,

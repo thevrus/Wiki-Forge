@@ -93,6 +93,16 @@ export function validateCompiledOutput(raw: string): ValidationResult {
     }
   }
 
+  // Check for insufficient source markers
+  const insufficientCount = (
+    parsed.body.match(/\[insufficient source data\]/gi) ?? []
+  ).length
+  if (insufficientCount > 0) {
+    warnings.push(
+      `${insufficientCount} section(s) marked as insufficient source data`,
+    )
+  }
+
   // Validate Mermaid blocks (basic syntax check)
   const mermaidBlocks = doc.match(/```mermaid\n([\s\S]*?)```/g) ?? []
   for (const block of mermaidBlocks) {

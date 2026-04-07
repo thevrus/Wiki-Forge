@@ -12,7 +12,7 @@ export function createClaudeProvider(config: ProviderConfig): {
       const response = await client.messages.create({
         model,
         max_tokens: 65536,
-        temperature: 0.1,
+        temperature: 0,
         ...(system ? { system } : {}),
         messages: [{ role: "user", content: prompt }],
       })
