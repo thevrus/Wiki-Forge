@@ -514,6 +514,11 @@ async function runFullRecompile(
   compileProvider: LLMProvider,
 ): Promise<string> {
   const sourceCode = gatherFullSource(entry, repoRoot)
+  if (!sourceCode.trim()) {
+    throw new Error(
+      `No source files found for sources: ${entry.sources.join(", ")}. Check that these directories exist.`,
+    )
+  }
   const summaryPrompt = summarizeSourcePrompt(entry, sourceCode)
   const summary = await triageProvider.generate(summaryPrompt)
 
@@ -537,6 +542,9 @@ async function runHealthCheck(
   triageProvider: LLMProvider,
 ): Promise<string[]> {
   const sourceCode = gatherFullSource(entry, repoRoot)
+  if (!sourceCode.trim()) {
+    return [`No source files found for sources: ${entry.sources.join(", ")}`]
+  }
   const prompt = healthCheckPrompt(entry, currentDoc, sourceCode)
   const raw = await triageProvider.generate(prompt)
   const { healthy, issues } = parseHealthResponse(raw)

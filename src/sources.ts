@@ -84,6 +84,10 @@ export function gatherFullSource(entry: DocEntry, repoRoot: string): string {
   // Deduplicate
   const unique = [...new Set(allFiles)]
 
+  if (unique.length === 0) {
+    return ""
+  }
+
   let total = 0
   const chunks: string[] = []
 
