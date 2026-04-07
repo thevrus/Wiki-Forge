@@ -432,6 +432,7 @@ export async function orchestrate(
   const entries = Object.entries(docMap.docs)
   const total = entries.length
   let current = 0
+  const compileTimes: number[] = [] // seconds per doc, for ETA
 
   for (const [docPath, entry] of entries) {
     if (!entry) continue
@@ -505,7 +506,18 @@ export async function orchestrate(
     }
 
     if (forceRecompile) {
-      const cs = log.compileProgress(current, total, `Gathering ${docPath}`)
+      const avgTime =
+        compileTimes.length > 0
+          ? compileTimes.reduce((a, b) => a + b, 0) / compileTimes.length
+          : undefined
+      const remaining = avgTime ? (total - current + 1) * avgTime : undefined
+      const cs = log.compileProgress(
+        current,
+        total,
+        `Gathering ${docPath}`,
+        undefined,
+        remaining,
+      )
       const gather = gatherFullSource(entry, repoRoot)
       if (gather.content === "") {
         cs.fail(`${docPath} — ${noSourcesMessage(entry)}`)
@@ -523,7 +535,9 @@ export async function orchestrate(
         providers.triage,
         providers.compile,
       )
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      const elapsedSec = (Date.now() - t0) / 1000
+      compileTimes.push(elapsedSec)
+      const elapsed = elapsedSec.toFixed(1)
       const validation = validateCompiledOutput(updated)
       if (!validation.valid) {
         cs.fail(`${docPath} — rejected`)
@@ -557,11 +571,17 @@ export async function orchestrate(
       // Diff-only recompile: send previous doc + git diff (not full source)
       const affectedFiles = [...hashDiff.changedFiles, ...hashDiff.addedFiles]
       const nChanged = affectedFiles.length + hashDiff.removedFiles.length
+      const avgTime =
+        compileTimes.length > 0
+          ? compileTimes.reduce((a, b) => a + b, 0) / compileTimes.length
+          : undefined
+      const remaining = avgTime ? (total - current + 1) * avgTime : undefined
       const cs = log.compileProgress(
         current,
         total,
         `Compiling ${docPath}`,
         `${nChanged} changed`,
+        remaining,
       )
       const t0 = Date.now()
       const updated = await runDiffRecompile(
@@ -573,7 +593,9 @@ export async function orchestrate(
         styleGuide,
         providers.compile,
       )
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      const elapsedSec = (Date.now() - t0) / 1000
+      compileTimes.push(elapsedSec)
+      const elapsed = elapsedSec.toFixed(1)
       const validation = validateCompiledOutput(updated)
       if (!validation.valid) {
         cs.fail(`${docPath} — rejected`)

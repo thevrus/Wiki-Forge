@@ -56,37 +56,44 @@ export type CompileSpinner = {
  *   // ... LLM call ...
  *   s.succeed("ARCHITECTURE.md (32.1s)")
  */
+function formatTime(seconds: number): string {
+  if (seconds >= 60) {
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  }
+  return `${seconds}s`
+}
+
 export function compileProgress(
   current: number,
   total: number,
   text: string,
   detail?: string,
+  etaSeconds?: number,
 ): CompileSpinner {
+  const etaStr = etaSeconds
+    ? ` · ${pc.yellow(`~${formatTime(Math.round(etaSeconds))} remaining`)}`
+    : ""
+
   const spinner = ora({
-    text: formatProgress(current, total, text, detail),
+    text: formatProgress(current, total, text, detail) + etaStr,
     color: "cyan",
     spinner: "dots",
   }).start()
 
   // Update elapsed time every 5 seconds so user knows it's alive
   const startTime = Date.now()
+  let currentDetail = detail
   const timer = setInterval(() => {
     const elapsed = Math.round((Date.now() - startTime) / 1000)
-    const timeStr =
-      elapsed >= 60
-        ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
-        : `${elapsed}s`
-    spinner.text = formatProgress(
-      current,
-      total,
-      text,
-      detail ? `${detail} · ${timeStr}` : timeStr,
-    )
+    const timeStr = formatTime(elapsed)
+    const parts = currentDetail ? `${currentDetail} · ${timeStr}` : timeStr
+    spinner.text = formatProgress(current, total, text, parts) + etaStr
   }, 5000)
 
   return {
     update(newText: string, newDetail?: string) {
-      spinner.text = formatProgress(current, total, newText, newDetail)
+      currentDetail = newDetail
+      spinner.text = formatProgress(current, total, newText, newDetail) + etaStr
     },
     succeed(msg: string) {
       clearInterval(timer)
