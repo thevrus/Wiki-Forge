@@ -1,48 +1,81 @@
 Initialize a wiki-forge documentation wiki for this repository.
 
-## What you'll do
+## Phase 1: Understand the project
 
-1. Scan the repository structure (top-level and one level deep, skip node_modules/dist/build/.git)
-2. Show the user what directories you found
-3. Suggest documentation pages based on what exists:
+Before scanning anything, interview the user. Ask these questions ONE AT A TIME (wait for each answer):
 
-| Directory patterns found | Suggest this doc |
-|---|---|
-| src/, lib/, server/, backend/ | **ARCHITECTURE.md** — System architecture: services, APIs, data flows |
-| src/app/, src/pages/, src/components/, src/screens/, app/, pages/ | **PRODUCT.md** — User-facing screens, flows, features |
-| src/types/, src/models/, src/db/, prisma/, drizzle/, schema/ | **DATA.md** — Data models, entities, relationships |
-| src/lib/, src/utils/, src/middleware/, src/services/, lib/ | **BUSINESS_RULES.md** — Validation rules, business logic, constraints |
-| src/api/, src/routes/, src/controllers/, api/, routes/ | **API.md** — Endpoints, authentication, request/response formats |
-| (any source dir exists) | **DECISIONS.md** — Architectural decision records *(health-check type)* |
+1. **"What does this project do in one sentence?"**
+   - If a README exists, read it first and propose an answer. Let them correct it.
 
-4. For each suggestion, ask the user: **Include? [Y/n]** — let them accept, skip, or modify
-5. Ask if they want to add any custom docs not in the suggestions
-6. Ask which directory to use for the wiki (default: `docs/`)
+2. **"Who needs to understand this codebase but can't read the code?"**
+   - Examples: PMs, designers, new engineers, QA, clients, investors
+   - This determines the writing style
 
-## What you'll write
+3. **"What questions do those people ask you most often?"**
+   - Examples: "How does X work?", "What are the rules for Y?", "What changed recently?"
+   - These become the docs
 
-Create `{docs_dir}/.doc-map.json`:
+4. **"What parts of the codebase are the most confusing or undocumented?"**
+   - These get priority in the doc map
 
-```json
-{
-  "docs": {
-    "ARCHITECTURE.md": {
-      "description": "System architecture: services, APIs, data flows, and infrastructure",
-      "type": "compiled",
-      "sources": ["src/"],
-      "context_files": ["package.json", "tsconfig.json"]
-    }
-  }
-}
+5. **"Are there business rules or constraints that aren't obvious from the code?"**
+   - Fees, limits, eligibility, approval flows, edge cases
+   - These go into BUSINESS_RULES.md
+
+6. **"Anything that should NOT be documented?"**
+   - Internal tools, deprecated code, sensitive logic
+
+## Phase 2: Scan the codebase
+
+Now scan the repo structure:
+- Read the top-level and one-level-deep directories (skip node_modules, dist, build, .git)
+- Read package.json, README, and any config files for context
+- Identify the tech stack, framework, and project type
+
+## Phase 3: Suggest docs
+
+Based on BOTH the interview answers AND the directory structure, suggest documentation pages. For each suggestion, explain WHY this doc matters for the audience they described.
+
+Format each suggestion like:
+
+```
+📄 PRODUCT.md
+   "User-facing screens, flows, and features in the popup UI"
+   Sources: src/components/, src/popup/
+   Why: You mentioned PMs ask "what does the extension do?" — this answers that.
+   Include? [Y/n/edit]
 ```
 
-Each entry has:
-- **description** — tells the LLM what this doc is about (be specific to this codebase)
-- **type** — `"compiled"` (LLM writes it) or `"health-check"` (human writes it, LLM checks for contradictions)
-- **sources** — directories/files to read when compiling this doc
-- **context_files** — always-included files for broader understanding
+Standard suggestions to consider (only if relevant):
 
-Also create the directory structure:
+| Doc | When to suggest |
+|---|---|
+| ARCHITECTURE.md | Always — system overview |
+| PRODUCT.md | When there's UI (components, pages, screens) |
+| BUSINESS_RULES.md | When there's validation, pricing, limits, or constraints |
+| DATA.md | When there are data models, schemas, databases |
+| API.md | When there are API endpoints or routes |
+| DECISIONS.md (health-check) | When the user mentions past decisions or trade-offs |
+
+Also suggest custom docs based on the interview. If they said "people always ask about the billing flow," suggest a **BILLING.md** — don't force it into a generic category.
+
+## Phase 4: Customize
+
+After the user confirms their selection:
+
+1. Ask: **"What directory for the wiki?"** (default: `docs/`)
+2. Ask: **"Any style preferences?"** — e.g. "more technical", "include code examples", "keep it very short". Store this in the `style` field.
+
+## Phase 5: Write
+
+Create `{docs_dir}/.doc-map.json` with the confirmed docs. Each entry should have:
+- **description** — specific to THIS project, informed by the interview (not generic)
+- **type** — `"compiled"` or `"health-check"`
+- **sources** — directories that feed this doc
+- **context_files** — always-included files (package.json, config files)
+- **style** (optional, top-level) — if the user gave style preferences
+
+Also create:
 ```
 {docs_dir}/
   .doc-map.json
@@ -51,4 +84,4 @@ Also create the directory structure:
   synthesis/
 ```
 
-After writing, tell the user to run `/wf-compile --force` to generate the docs.
+End with: **"Setup complete. Run `/wf-compile --force` to generate your wiki."**
