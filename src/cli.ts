@@ -168,7 +168,7 @@ function detectSourceDirs(repo: string): string[] {
   const { existsSync, readdirSync, statSync } =
     require("node:fs") as typeof import("node:fs")
 
-  // Common source directory names, ordered by priority
+  // Common source directory names across all languages/frameworks
   const candidates = [
     "src",
     "lib",
@@ -182,6 +182,23 @@ function detectSourceDirs(repo: string): string[] {
     "core",
     "modules",
     "components",
+    // Go
+    "cmd",
+    "pkg",
+    "internal",
+    // Rust
+    "crates",
+    // Python
+    "django",
+    "flask",
+    // Java/Kotlin
+    "main",
+    "domain",
+    // Ruby
+    "controllers",
+    "models",
+    // Elixir
+    "mix",
   ]
 
   const sourceExts = new Set([
@@ -194,8 +211,13 @@ function detectSourceDirs(repo: string): string[] {
     ".rs",
     ".rb",
     ".java",
-    ".swift",
     ".kt",
+    ".scala",
+    ".cs",
+    ".swift",
+    ".php",
+    ".ex",
+    ".dart",
   ])
 
   const found: string[] = []
@@ -296,6 +318,53 @@ function detectWorkspacePackages(
   return packages
 }
 
+function scanDomainDirs(dir: string): string[] {
+  const { readdirSync } = require("node:fs") as typeof import("node:fs")
+  const dirs: string[] = []
+
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      if (
+        !entry.isDirectory() ||
+        entry.name.startsWith(".") ||
+        entry.name === "node_modules" ||
+        entry.name === "dist" ||
+        entry.name === "build" ||
+        entry.name === ".expo" ||
+        entry.name === ".next" ||
+        entry.name === "assets" ||
+        entry.name === "docs"
+      )
+        continue
+
+      dirs.push(`${entry.name}/`)
+
+      // Scan one level deeper for rich subdirectories
+      try {
+        const subEntries = readdirSync(`${dir}/${entry.name}`, {
+          withFileTypes: true,
+        })
+        for (const sub of subEntries) {
+          if (
+            sub.isDirectory() &&
+            !sub.name.startsWith(".") &&
+            sub.name !== "node_modules"
+          ) {
+            dirs.push(`${entry.name}/${sub.name}/`)
+          }
+        }
+      } catch {
+        // skip
+      }
+    }
+  } catch {
+    // skip
+  }
+
+  return dirs
+}
+
 async function runInit(repo: string, customDocsDir?: string) {
   const { mkdirSync, writeFileSync, existsSync } = await import("node:fs")
   const dirName = customDocsDir ?? "docs"
@@ -327,11 +396,11 @@ async function runInit(repo: string, customDocsDir?: string) {
   > = {}
 
   if (workspaces.length > 1) {
-    // Monorepo: one doc per workspace package + one overview
+    // Monorepo: comprehensive docs per workspace + cross-cutting docs
     const allSources = detectSourceDirs(repo)
     docs["ARCHITECTURE.md"] = {
       description:
-        "Monorepo overview: workspace structure, shared dependencies, and cross-package data flow",
+        "Monorepo overview: workspace structure, shared dependencies, cross-package data flow, and tech stack",
       type: "compiled",
       sources: allSources,
       context_files: contextFiles,
@@ -339,32 +408,105 @@ async function runInit(repo: string, customDocsDir?: string) {
 
     for (const pkg of workspaces) {
       const slug = pkg.name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-")
-      docs[`${slug.toUpperCase()}.md`] = {
-        description: `${pkg.name}: features, API, data flow, and business rules`,
-        type: "compiled",
-        sources: [pkg.path],
-        context_files: contextFiles,
+      const upper = slug.toUpperCase()
+
+      // Scan for domain-specific subdirectories
+      const pkgFull = `${repo}/${pkg.path}`
+      const subDirs = scanDomainDirs(pkgFull)
+
+      if (subDirs.length <= 3) {
+        // Small package: single doc
+        docs[`${upper}.md`] = {
+          description: `${pkg.name}: complete knowledge base — features, user flows, business rules, data model, integrations`,
+          type: "compiled",
+          sources: [pkg.path],
+          context_files: contextFiles,
+        }
+      } else {
+        // Large package: split into focused docs per domain
+        // Always create a main overview doc
+        docs[`${upper}.md`] = {
+          description: `${pkg.name} overview: product features, user flows, screens, and navigation`,
+          type: "compiled",
+          sources: subDirs
+            .filter((d) =>
+              /\/(app|pages?|screens?|views?|components)\//.test(d),
+            )
+            .map((d) => `${pkg.path}${d}`)
+            .slice(0, 6),
+          context_files: contextFiles,
+        }
+        // Fallback: if no app/components dirs found, use entire package
+        if (
+          (docs[`${upper}.md`] as { sources: string[] }).sources.length === 0
+        ) {
+          ;(docs[`${upper}.md`] as { sources: string[] }).sources = [pkg.path]
+        }
+
+        // Business rules doc (constants, config, validations)
+        const bizDirs = subDirs.filter((d) =>
+          /\/(constants?|config|rules?|validations?|policies)\//.test(d),
+        )
+        if (bizDirs.length > 0) {
+          docs[`${upper}-BUSINESS-RULES.md`] = {
+            description: `${pkg.name} business rules: pricing, limits, validation, feature flags, discounts, state machines`,
+            type: "compiled",
+            sources: bizDirs.map((d) => `${pkg.path}${d}`),
+            context_files: contextFiles,
+          }
+        }
+
+        // Data & API doc (hooks, services, API, store, graphql)
+        const dataDirs = subDirs.filter((d) =>
+          /\/(hooks?|services?|api|store|graphql|lib)\//.test(d),
+        )
+        if (dataDirs.length > 0) {
+          docs[`${upper}-DATA-LAYER.md`] = {
+            description: `${pkg.name} data layer: hooks, services, API clients, state management, data flows`,
+            type: "compiled",
+            sources: dataDirs.map((d) => `${pkg.path}${d}`),
+            context_files: contextFiles,
+          }
+        }
       }
     }
 
     console.log(`📚 Created ${dirName}/.doc-map.json (monorepo detected)`)
-    console.log(`   ${workspaces.length} workspace packages found:`)
-    for (const pkg of workspaces) {
-      console.log(`     ${pkg.name} → ${pkg.path}`)
+    console.log(`   ${workspaces.length} workspace packages found`)
+    console.log(`   ${Object.keys(docs).length} docs configured:`)
+    for (const name of Object.keys(docs)) {
+      console.log(`     ${name}`)
     }
   } else {
-    // Single project: one doc
+    // Single project: comprehensive docs
     const sources = detectSourceDirs(repo)
-    docs["ARCHITECTURE.md"] = {
+    const subDirs = scanDomainDirs(repo)
+
+    docs["PRODUCT.md"] = {
       description:
-        "High-level system architecture: services, data flow, and infrastructure",
+        "Complete product knowledge base: features, user flows, business rules, data model, integrations, and architecture",
       type: "compiled",
       sources,
       context_files: contextFiles,
     }
 
+    // If the project is large enough, split into focused docs
+    const bizDirs = subDirs.filter((d) =>
+      /\/(constants?|config|rules?|validations?)\//.test(d),
+    )
+    if (bizDirs.length > 0) {
+      docs["BUSINESS-RULES.md"] = {
+        description:
+          "Business rules: pricing, limits, validation, feature flags, discounts, permissions",
+        type: "compiled",
+        sources: bizDirs,
+        context_files: contextFiles,
+      }
+    }
+
     console.log(`📚 Created ${dirName}/.doc-map.json`)
     console.log(`   Detected sources: ${sources.join(", ")}`)
+    console.log(`   ${Object.keys(docs).length} docs configured`)
   }
 
   writeFileSync(docMapPath, `${JSON.stringify({ docs }, null, 2)}\n`)
