@@ -1,9 +1,19 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Wiki Forge" width="400" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg" />
+    <img src="assets/logo.svg" alt="Wiki Forge" width="400" />
+  </picture>
 </p>
 
 <p align="center">
-  <strong>Your codebase already knows everything. Your team shouldn't have to read it to find out.</strong>
+  <strong>The open-source docs compiler that lives in your repo, runs in your CI, and never phones home.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/local--first-blue?style=flat-square" alt="Local-first" />
+  <img src="https://img.shields.io/badge/works%20offline-blue?style=flat-square" alt="Works offline" />
+  <img src="https://img.shields.io/badge/your%20code%20stays%20yours-blue?style=flat-square" alt="Your code stays yours" />
 </p>
 
 Wiki Forge compiles your source code into a plain-language wiki that PMs, designers, and new engineers can actually understand. When code changes, it detects drift and rewrites only what changed.
@@ -19,40 +29,30 @@ Your code ──→ Wiki Forge ──→ Up-to-date wiki
 
 Documentation rots because maintaining it is manual work that competes with shipping features. Wiki Forge treats docs as compiled artifacts — the code is the source of truth, the LLM is the compiler, the docs are the build output.
 
-| Approach | How it works | Downside |
-|---|---|---|
-| Write docs manually | Engineer authors and maintains | Goes stale, competes with shipping |
-| RAG / chatbot | Re-reads code on every question | Slow, expensive, no persistence |
-| **Wiki Forge** | Compiles once, updates incrementally | Version-controlled, reviewed, always current |
+| | Manual Docs | RAG / Chatbot | Google Code Wiki | **Wiki Forge** |
+|---|---|---|---|---|
+| Output you own | :white_check_mark: | :x: | :x: | :white_check_mark: |
+| Version-controlled | :white_check_mark: | :x: | :x: | :white_check_mark: |
+| Works offline / air-gapped | :white_check_mark: | :x: | :x: | :white_check_mark: |
+| Auto-updates | :x: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| Reviewable as a PR | :white_check_mark: | :x: | :x: | :white_check_mark: |
+| Cost | time | per query | freemium | per compile |
+
+## Your code stays yours
+
+With `--provider local`, Wiki Forge pipes prompts through your local
+`claude` or `ollama` CLI. Nothing leaves your machine.
+
+| Provider | Where your code goes |
+|---|---|
+| `gemini` / `claude` / `openai` | API call to vendor |
+| `local` | Stays on your machine, always |
 
 ---
 
 ## Two ways to use it
 
-### 1. Claude Code slash commands (recommended)
-
-```bash
-npx wiki-forge install-commands
-```
-
-That's it. No cloning, no config. Now open any project in Claude Code and type `/wf-init`.
-
-Then in any project:
-
-```
-/wf-init                     # interview + scan → creates .doc-map.json
-/wf-compile --force          # compile all docs from scratch
-/wf-compile                  # incremental — only recompile drifted docs
-/wf-check                    # preview what drifted (read-only)
-/wf-health                   # check human-written docs for contradictions
-/wf-validate                 # check config for missing sources
-/wf-index                    # regenerate INDEX.md
-/wf-query "how do fees work" # ask questions, save answers as wiki pages
-```
-
-No API key needed — Claude Code is the LLM.
-
-### 2. GitHub Action (for CI/CD)
+### 1. GitHub Action (for CI/CD)
 
 Automatically compiles docs on every push to main:
 
@@ -94,6 +94,29 @@ jobs:
           delete-branch: true
 ```
 
+### 2. Claude Code slash commands
+
+```bash
+npx wiki-forge install-commands
+```
+
+That's it. No cloning, no config. Now open any project in Claude Code and type `/wf-init`.
+
+Then in any project:
+
+```
+/wf-init                     # interview + scan → creates .doc-map.json
+/wf-compile --force          # compile all docs from scratch
+/wf-compile                  # incremental — only recompile drifted docs
+/wf-check                    # preview what drifted (read-only)
+/wf-health                   # check human-written docs for contradictions
+/wf-validate                 # check config for missing sources
+/wf-index                    # regenerate INDEX.md
+/wf-query "how do fees work" # ask questions, save answers as wiki pages
+```
+
+No API key needed — Claude Code is the LLM.
+
 ---
 
 ## What it produces
@@ -121,8 +144,6 @@ Each compiled doc includes:
 - **Inline citations** like `(source: auth module)` — plain language, not file paths
 - **No code snippets** — written for PMs, not engineers
 
----
-
 ## How it works
 
 ### Init: interview-first setup
@@ -136,12 +157,20 @@ Then scans the codebase and suggests docs informed by both your answers and the 
 
 ### Compile: two-pass, cost-optimized
 
-1. **Triage (cheap model)** — "Did this doc drift?" Most pushes stop here (~$0.01).
+1. **Triage (cheap model)** — "Did this doc drift?" Most pushes stop here.
 2. **Recompile (expensive model)** — Only runs on drifted docs.
 
 With `--force`, it does a deeper two-pass:
 1. **Summarize** — Reads all source, extracts structured facts
 2. **Compile** — Writes the doc from the summary
+
+#### Estimated cost per compile
+
+| Repo size | Triage cost | Full recompile |
+|---|---|---|
+| Small (~10 files) | ~$0.01 | ~$0.10 |
+| Medium (~100 files) | ~$0.05 | ~$0.50 |
+| Large (~500 files) | ~$0.10 | ~$2.00 |
 
 ### Structured wiki output
 
@@ -160,7 +189,7 @@ Each gets its own wiki page. The INDEX.md links everything together.
 For human-written docs (ADRs, decision logs), Wiki Forge doesn't rewrite — it checks for contradictions:
 
 ```
-⚠ DECISIONS.md:
+Warning: DECISIONS.md:
   - Decision #3 says "no database" but src/db/ directory now exists
   - Decision #7 references "XState FSM" but the cart now uses Zustand
 ```
@@ -252,6 +281,16 @@ See [`examples/`](examples/) for:
 
 ---
 
+## Used by
+
+Using Wiki Forge? [Open a PR](https://github.com/thevrus/wiki-forge/pulls) to add your project here.
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+[MIT](./LICENSE)

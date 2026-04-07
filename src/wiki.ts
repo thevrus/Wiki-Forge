@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { DocMap } from "./config"
+import { getDirectoryAuthors } from "./git"
 import type { LLMProvider } from "./providers/types"
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -76,23 +77,33 @@ function topicPagePrompt(
   topic: Topic,
   type: "entity" | "concept",
   docsContext: string,
+  authorContext: string,
 ): string {
   return [
     `Write a short wiki page about "${topic.name}" (${type}).`,
     `${topic.description}`,
     "",
     "Rules:",
-    "- Start with YAML frontmatter: type, description, referenced_in (list of doc names)",
+    "- Start with YAML frontmatter containing these fields:",
+    `  title: "Human-readable name"`,
+    `  slug: "${topic.slug}"`,
+    `  category: ${type === "entity" ? "entities" : "concepts"}`,
+    `  icon: (one emoji representing this ${type})`,
+    `  description: "One-sentence summary"`,
+    `  type: ${type}`,
+    `  referenced_in: [list of doc names that mention this]`,
     "- 2-3 paragraph overview explaining what this is and why it matters",
     "- Use ### subsections if needed (relationships, current state, rules)",
     "- Write for PMs and designers, not engineers",
     "- Be specific and factual — name concrete behaviors, limits, states",
+    "- If contributor data is provided, naturally mention who maintains or owns this area",
     "- End with a See also line linking related entity/concept names",
     "- Keep it under 300 words",
     "- Return ONLY markdown, no fencing",
     "",
     "## Source documentation (excerpts):",
     docsContext,
+    authorContext,
   ].join("\n")
 }
 
@@ -133,6 +144,7 @@ export async function generateWiki(
   docsDir: string,
   docMap: DocMap,
   triageProvider: LLMProvider,
+  repoRoot?: string,
 ): Promise<{ entities: number; concepts: number }> {
   const fullContext = buildExtractionContext(docsDir, docMap)
   if (!fullContext.trim()) return { entities: 0, concepts: 0 }
@@ -146,6 +158,28 @@ export async function generateWiki(
     return { entities: 0, concepts: 0 }
   }
 
+  // Collect all source paths for author lookups
+  const allSources = Object.values(docMap.docs)
+    .filter((e) => e != null)
+    .flatMap((e) => e.sources)
+
+  // Build author context once for entity/concept pages
+  let authorContext = ""
+  if (repoRoot && allSources.length > 0) {
+    const contributors = getDirectoryAuthors(allSources, repoRoot)
+    if (contributors.length > 0) {
+      const lines = contributors
+        .slice(0, 10)
+        .map(
+          (c) =>
+            `- ${c.name}: ${c.commits} commits (last active: ${c.lastActive})`,
+        )
+      authorContext = ["", "## Contributors (from git history)", ...lines].join(
+        "\n",
+      )
+    }
+  }
+
   // Step 2: Create directories
   const entitiesDir = join(docsDir, "entities")
   const conceptsDir = join(docsDir, "concepts")
@@ -156,14 +190,14 @@ export async function generateWiki(
   const tasks = [
     ...entities.map(async (topic) => {
       const context = extractRelevantContext(topic, fullContext)
-      const prompt = topicPagePrompt(topic, "entity", context)
+      const prompt = topicPagePrompt(topic, "entity", context, authorContext)
       const content = await triageProvider.generate(prompt)
       const filePath = join(entitiesDir, `${topic.slug}.md`)
       writeFileSync(filePath, `${content.trim()}\n`)
     }),
     ...concepts.map(async (topic) => {
       const context = extractRelevantContext(topic, fullContext)
-      const prompt = topicPagePrompt(topic, "concept", context)
+      const prompt = topicPagePrompt(topic, "concept", context, authorContext)
       const content = await triageProvider.generate(prompt)
       const filePath = join(conceptsDir, `${topic.slug}.md`)
       writeFileSync(filePath, `${content.trim()}\n`)

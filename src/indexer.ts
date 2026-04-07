@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { DocMap } from "./config"
+import { getRecentChanges } from "./git"
 import type { LLMProvider } from "./providers/types"
 
 const SUMMARY_CAP = 10_000
@@ -22,6 +23,7 @@ export async function generateIndex(
   docsDir: string,
   docMap: DocMap,
   triageProvider: LLMProvider,
+  repoRoot?: string,
 ): Promise<string> {
   const entries = Object.entries(docMap.docs).filter(
     ([, entry]) => entry != null,
@@ -110,6 +112,24 @@ export async function generateIndex(
     lines.push("")
   }
 
+  // Recently changed heat map
+  if (repoRoot) {
+    const allSources = entries
+      .filter(([, e]) => e.type === "compiled")
+      .flatMap(([, e]) => e.sources)
+    const changes = getRecentChanges(allSources, repoRoot, 30)
+    if (changes.length > 0) {
+      lines.push("## Recently Changed (last 30 days)", "")
+      lines.push("| File | Changed by | Date | What changed |")
+      lines.push("|---|---|---|---|")
+      for (const c of changes.slice(0, 15)) {
+        const shortMsg =
+          c.message.length > 60 ? `${c.message.slice(0, 57)}...` : c.message
+        lines.push(`| ${c.file} | ${c.author} | ${c.date} | ${shortMsg} |`)
+      }
+      lines.push("")
+    }
+  }
 
   const indexContent = lines.join("\n")
   const indexPath = `${docsDir}/INDEX.md`

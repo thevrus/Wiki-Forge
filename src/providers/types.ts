@@ -3,9 +3,10 @@ export type LLMProvider = {
 }
 
 export type ProviderConfig = {
-  provider: "gemini" | "claude" | "openai" | "local"
+  provider: "gemini" | "claude" | "openai" | "local" | "ollama"
   apiKey: string
   triageModel?: string
   compileModel?: string
   localCmd?: string
+  ollamaUrl?: string
 }

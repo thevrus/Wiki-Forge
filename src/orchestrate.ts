@@ -1,11 +1,25 @@
 import { readFileSync, writeFileSync } from "node:fs"
+
 import type { DocEntry } from "./config"
 import { loadDocMap, resolveConfig } from "./config"
-import { getChangedFiles, getCurrentCommit, getLastSyncCommit } from "./git"
+import type { Contributor } from "./git"
+import {
+  getCurrentCommit,
+  getDiffForFiles,
+  getDirectoryAuthors,
+  getLastSyncCommit,
+} from "./git"
+import {
+  computeDocHashes,
+  diffHashes,
+  loadHashes,
+  saveHashes,
+  updateHashesForDoc,
+} from "./hashes"
 import { generateIndex } from "./indexer"
 import { createProviders } from "./providers"
 import type { LLMProvider, ProviderConfig } from "./providers/types"
-import { fileMatchesSources, gatherContext, gatherFullSource } from "./sources"
+import { gatherFullSource } from "./sources"
 import { appendCompilationLog, generateWiki } from "./wiki"
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -29,7 +43,26 @@ export type OrchestrateResult = {
 
 const DEFAULT_STYLE = `
 Write for a non-technical audience (PMs, designers). Explain WHAT the system does, not HOW.
-- YAML frontmatter: description (one sentence), sources (list), compiled_at (ISO timestamp)
+
+FRONTMATTER: Every doc MUST start with YAML frontmatter containing these fields:
+\`\`\`yaml
+---
+title: "Human-readable page title"
+slug: url-safe-lowercase-slug
+category: compiled
+icon: emoji or lucide icon name that represents the content (e.g. "🏗️" for architecture, "💳" for billing)
+description: "One-sentence summary for SEO and previews"
+sources: ["src/services/", "src/api/"]
+compiled_at: "ISO timestamp"
+---
+\`\`\`
+- title: concise, descriptive — what a PM would search for
+- slug: lowercase, hyphens, no spaces (e.g. "billing-service", "auth-flow")
+- category: always "compiled" for compiled docs
+- icon: pick one emoji that best represents the doc's main topic
+- description: one sentence, specific enough for a search result snippet
+
+BODY:
 - Open with a 2-3 sentence summary paragraph
 - Use ## for major sections, ### for subsections
 - Be specific: name features, state numbers, describe concrete behavior
@@ -48,45 +81,19 @@ CITATIONS: When stating a specific fact, behavior, or rule derived from the sour
 
 // ── Prompts ────────────────────────────────────────────────────────────
 
-function triagePrompt(
-  entry: DocEntry,
-  currentDoc: string,
-  diff: string,
-  contextCode: string,
-): string {
-  return [
-    "You are a documentation triage agent.",
-    "Determine if the following documentation needs to be updated based on the code changes.",
-    "",
-    `## Document description`,
-    entry.description,
-    "",
-    `## Current documentation`,
-    currentDoc,
-    "",
-    `## Code diff since last sync`,
-    diff || "(no diff available)",
-    "",
-    `## Relevant source code`,
-    contextCode || "(no context code)",
-    "",
-    "Respond with a JSON object (no markdown fencing):",
-    '{ "drifted": true/false, "reason": "one-line explanation" }',
-  ].join("\n")
-}
-
 function recompilePrompt(
   entry: DocEntry,
   currentDoc: string,
   diff: string,
   contextCode: string,
   style: string,
+  authorContext: string,
 ): string {
   const timestamp = new Date().toISOString()
   return [
     "You are a documentation compiler. Update the existing document to reflect the code changes.",
     "Preserve the document's structure. Only modify sections affected by the changes.",
-    "Update the compiled_at timestamp in frontmatter.",
+    "Update the compiled_at timestamp in frontmatter. Preserve all other frontmatter fields (title, slug, category, icon, contributors).",
     "Return ONLY the updated markdown content — no preamble, no fencing.",
     "",
     style,
@@ -104,6 +111,7 @@ function recompilePrompt(
     "",
     `## Relevant source code`,
     contextCode || "(no context)",
+    authorContext,
   ].join("\n")
 }
 
@@ -137,6 +145,7 @@ function fullRecompilePrompt(
   currentDoc: string,
   summary: string,
   style: string,
+  authorContext: string,
 ): string {
   const timestamp = new Date().toISOString()
   return [
@@ -155,6 +164,7 @@ function fullRecompilePrompt(
     "",
     `## Source code summary (structured facts extracted from code)`,
     summary,
+    authorContext,
   ].join("\n")
 }
 
@@ -188,6 +198,57 @@ function healthCheckPrompt(
   ].join("\n")
 }
 
+// ── Author context ────────────────────────────────────────────────────
+
+function formatAuthorContext(contributors: Contributor[]): string {
+  if (contributors.length === 0) return ""
+  const lines = contributors
+    .slice(0, 10)
+    .map(
+      (c) => `- ${c.name}: ${c.commits} commits (last active: ${c.lastActive})`,
+    )
+  return [
+    "",
+    "## Contributors (from git history)",
+    "The following people have made the most commits to this area of the codebase:",
+    ...lines,
+    "Weave authorship naturally into the documentation where relevant — mention who owns or maintains key areas.",
+  ].join("\n")
+}
+
+function buildContributorsFrontmatter(contributors: Contributor[]): string {
+  if (contributors.length === 0) return ""
+  const entries = contributors
+    .slice(0, 10)
+    .map(
+      (c) =>
+        `  - name: "${c.name}"\n    commits: ${c.commits}\n    last_active: "${c.lastActive}"`,
+    )
+  return `contributors:\n${entries.join("\n")}`
+}
+
+/** Injects contributors into existing YAML frontmatter, or adds frontmatter if missing */
+function injectContributorsFrontmatter(
+  doc: string,
+  contributors: Contributor[],
+): string {
+  if (contributors.length === 0) return doc
+  const block = buildContributorsFrontmatter(contributors)
+
+  // Doc already has frontmatter — inject before closing ---
+  if (doc.startsWith("---")) {
+    const closingIdx = doc.indexOf("---", 3)
+    if (closingIdx !== -1) {
+      const before = doc.slice(0, closingIdx).trimEnd()
+      const after = doc.slice(closingIdx)
+      return `${before}\n${block}\n${after}`
+    }
+  }
+
+  // No frontmatter — wrap the contributors block
+  return `---\n${block}\n---\n\n${doc}`
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function readDocFile(docPath: string): string {
@@ -195,26 +256,6 @@ function readDocFile(docPath: string): string {
     return readFileSync(docPath, "utf-8")
   } catch {
     return ""
-  }
-}
-
-function parseTriageResponse(raw: string): {
-  drifted: boolean
-  reason: string
-} {
-  try {
-    const cleaned = raw
-      .replace(/```json?\s*/g, "")
-      .replace(/```/g, "")
-      .trim()
-    const parsed = JSON.parse(cleaned)
-    return {
-      drifted: Boolean(parsed.drifted),
-      reason: String(parsed.reason ?? "no reason provided"),
-    }
-  } catch {
-    // If we can't parse, assume drifted to be safe
-    return { drifted: true, reason: "Could not parse triage response" }
   }
 }
 
@@ -259,7 +300,9 @@ export async function orchestrate(
 
   const lastSync = getLastSyncCommit(config.lastSyncPath, repoRoot)
   const currentCommit = getCurrentCommit(repoRoot)
-  const changedFiles = getChangedFiles(lastSync, repoRoot)
+
+  // File-level hashing for precise drift detection
+  let allHashes = loadHashes(config.docsDir)
 
   const result: OrchestrateResult = {
     updatedDocs: [],
@@ -305,13 +348,18 @@ export async function orchestrate(
     // Compiled type docs
     if (entry.type !== "compiled") continue
 
-    // Check if any source files changed for this doc
-    const allSources = [...entry.sources, ...entry.context_files]
-    const hasChanges =
-      forceRecompile ||
-      changedFiles.some((f) => fileMatchesSources(f, allSources))
+    // Hash-based drift detection: compare file hashes instead of git diff
+    const currentHashes = computeDocHashes(
+      entry.sources,
+      entry.context_files,
+      repoRoot,
+    )
+    const previousHashes = allHashes[docPath] ?? {}
+    const hashDiff = diffHashes(previousHashes, currentHashes)
 
-    if (!hasChanges && !forceRecompile) {
+    const hasChanges = forceRecompile || hashDiff.changed
+
+    if (!hasChanges) {
       console.log(`${progress} ⏭  ${docPath} — no changes`)
       result.triageResults.push({
         doc: docPath,
@@ -322,18 +370,17 @@ export async function orchestrate(
     }
 
     if (mode === "check") {
-      console.log(`${progress} 🔍 Triaging ${docPath}...`)
-      const triageResult = await runTriage(
-        entry,
-        currentDoc,
-        changedFiles,
-        repoRoot,
-        lastSync,
-        providers.triage,
-      )
-      const icon = triageResult.drifted ? "⚡" : "✅"
-      console.log(`${progress} ${icon} ${docPath} — ${triageResult.reason}`)
-      result.triageResults.push({ doc: docPath, ...triageResult })
+      const delta = [
+        ...hashDiff.changedFiles.map((f) => `modified: ${f}`),
+        ...hashDiff.addedFiles.map((f) => `added: ${f}`),
+        ...hashDiff.removedFiles.map((f) => `removed: ${f}`),
+      ]
+      const reason =
+        delta.length > 0
+          ? `${delta.length} file(s) changed: ${delta.slice(0, 3).join(", ")}${delta.length > 3 ? "..." : ""}`
+          : "Force check"
+      console.log(`${progress} ⚡ ${docPath} — ${reason}`)
+      result.triageResults.push({ doc: docPath, drifted: true, reason })
       continue
     }
 
@@ -358,44 +405,48 @@ export async function orchestrate(
         drifted: true,
         reason: "Force recompile",
       })
+      allHashes = updateHashesForDoc(allHashes, docPath, currentHashes)
     } else {
-      console.log(`${progress} 🔍 Triaging ${docPath}...`)
-      const triageResult = await runTriage(
+      // Diff-only recompile: send previous doc + git diff (not full source)
+      const affectedFiles = [...hashDiff.changedFiles, ...hashDiff.addedFiles]
+      const nChanged = affectedFiles.length + hashDiff.removedFiles.length
+      console.log(
+        `${progress} 📝 Recompiling ${docPath} (${nChanged} file(s) changed)...`,
+      )
+      const t0 = Date.now()
+      const updated = await runDiffRecompile(
         entry,
         currentDoc,
-        changedFiles,
+        affectedFiles,
         repoRoot,
         lastSync,
-        providers.triage,
+        styleGuide,
+        providers.compile,
       )
-      result.triageResults.push({ doc: docPath, ...triageResult })
-
-      if (triageResult.drifted) {
-        console.log(`${progress} 📝 Recompiling ${docPath}...`)
-        const updated = await runRecompile(
-          entry,
-          currentDoc,
-          changedFiles,
-          repoRoot,
-          lastSync,
-          styleGuide,
-          providers.compile,
-        )
-        console.log(`${progress} ✅ Compiled ${docPath}`)
-        writeFileSync(fullDocPath, updated)
-        result.updatedDocs.push(docPath)
-        result.docDiffs.push({
-          doc: docPath,
-          before: currentDoc,
-          after: updated,
-        })
-      }
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
+      writeFileSync(fullDocPath, updated)
+      result.updatedDocs.push(docPath)
+      result.docDiffs.push({
+        doc: docPath,
+        before: currentDoc,
+        after: updated,
+      })
+      result.triageResults.push({
+        doc: docPath,
+        drifted: true,
+        reason: `${nChanged} file(s) changed`,
+      })
+      allHashes = updateHashesForDoc(allHashes, docPath, currentHashes)
     }
   }
 
-  // Update .last-sync with current commit (only in compile mode)
-  if (mode === "compile" && currentCommit) {
-    writeFileSync(config.lastSyncPath, `${currentCommit}\n`)
+  // Persist hashes and .last-sync (only in compile mode)
+  if (mode === "compile") {
+    saveHashes(config.docsDir, allHashes)
+    if (currentCommit) {
+      writeFileSync(config.lastSyncPath, `${currentCommit}\n`)
+    }
   }
 
   // Post-compilation: wiki pages, index, and log
@@ -405,6 +456,7 @@ export async function orchestrate(
       config.docsDir,
       docMap,
       providers.triage,
+      repoRoot,
     )
     if (wikiResult.entities > 0 || wikiResult.concepts > 0) {
       console.log(
@@ -413,7 +465,7 @@ export async function orchestrate(
     }
 
     console.log("📇 Generating INDEX.md...")
-    await generateIndex(config.docsDir, docMap, providers.triage)
+    await generateIndex(config.docsDir, docMap, providers.triage, repoRoot)
 
     appendCompilationLog(config.docsDir, {
       updatedDocs: result.updatedDocs,
@@ -428,26 +480,8 @@ export async function orchestrate(
 
 // ── Pipeline steps ─────────────────────────────────────────────────────
 
-async function runTriage(
-  entry: DocEntry,
-  currentDoc: string,
-  changedFiles: string[],
-  repoRoot: string,
-  lastSync: string,
-  triageProvider: LLMProvider,
-): Promise<{ drifted: boolean; reason: string }> {
-  const { diff, contextCode } = gatherContext(
-    entry,
-    changedFiles,
-    repoRoot,
-    lastSync,
-  )
-  const prompt = triagePrompt(entry, currentDoc, diff, contextCode)
-  const raw = await triageProvider.generate(prompt)
-  return parseTriageResponse(raw)
-}
-
-async function runRecompile(
+/** Diff-only recompile: sends previous doc + git diff instead of full source */
+async function runDiffRecompile(
   entry: DocEntry,
   currentDoc: string,
   changedFiles: string[],
@@ -456,15 +490,19 @@ async function runRecompile(
   style: string,
   compileProvider: LLMProvider,
 ): Promise<string> {
-  const { diff, contextCode } = gatherContext(
+  const diff = getDiffForFiles(lastSync, changedFiles, repoRoot)
+  const contributors = getDirectoryAuthors(entry.sources, repoRoot)
+  const authorContext = formatAuthorContext(contributors)
+  const prompt = recompilePrompt(
     entry,
-    changedFiles,
-    repoRoot,
-    lastSync,
+    currentDoc,
+    diff,
+    "",
+    style,
+    authorContext,
   )
-  const prompt = recompilePrompt(entry, currentDoc, diff, contextCode, style)
   const result = await compileProvider.generate(prompt)
-  return `${result.trim()}\n`
+  return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
 }
 
 async function runFullRecompile(
@@ -479,9 +517,17 @@ async function runFullRecompile(
   const summaryPrompt = summarizeSourcePrompt(entry, sourceCode)
   const summary = await triageProvider.generate(summaryPrompt)
 
-  const prompt = fullRecompilePrompt(entry, currentDoc, summary, style)
+  const contributors = getDirectoryAuthors(entry.sources, repoRoot)
+  const authorContext = formatAuthorContext(contributors)
+  const prompt = fullRecompilePrompt(
+    entry,
+    currentDoc,
+    summary,
+    style,
+    authorContext,
+  )
   const result = await compileProvider.generate(prompt)
-  return `${result.trim()}\n`
+  return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
 }
 
 async function runHealthCheck(

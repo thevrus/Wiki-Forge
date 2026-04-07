@@ -14,21 +14,26 @@ Usage:
 
 Commands:
   init         Scaffold .doc-map.json with an example entry
+  brain-init   Scaffold brain/ business knowledge templates
+  status       Show drift dashboard (no writes, no LLM calls)
   check        Triage only — report which docs drifted (no writes)
   compile      Full compilation — triage + recompile drifted docs
   health       Run health checks on health-check type docs only
+  authors      Generate AUTHORS.md from git history (no LLM calls)
   index        Regenerate INDEX.md from existing docs (uses triage model)
   validate         Check .doc-map.json for missing sources and config errors
   install-commands Install /wf-* slash commands for Claude Code
 
 Flags:
-  --provider <gemini|claude|openai|local>  LLM provider (default: gemini)
+  --provider <gemini|claude|openai|ollama|local>  LLM provider (default: gemini)
   --api-key <key>                     API key (or set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY)
   --repo <path>                       Repository root (default: current directory)
   --docs-dir <path>                   Docs output directory (default: docs/)
   --force                             Force recompile all docs regardless of drift
   --interactive, -i                   Interactive setup (for init command)
   --local-cmd <cmd>                   CLI command for local provider (default: "claude -p")
+  --ollama-model <model>              Ollama model name (default: llama3.1)
+  --ollama-url <url>                  Ollama server URL (default: http://localhost:11434)
 
 Examples:
   wiki-forge init
@@ -38,6 +43,7 @@ Examples:
   wiki-forge compile --provider local
   wiki-forge compile --provider local --local-cmd "codex -q"
   wiki-forge compile --provider claude --api-key sk-ant-...
+  wiki-forge compile --provider ollama --ollama-model deepseek-r1
   wiki-forge compile --force --docs-dir documentation
   wiki-forge health
 `.trim()
@@ -50,23 +56,27 @@ const ENV_KEY_MAP: Record<string, string> = {
 
 function parseArgs(argv: string[]): {
   command: string | undefined
-  provider: "gemini" | "claude" | "openai" | "local"
+  provider: "gemini" | "claude" | "openai" | "local" | "ollama"
   apiKey: string | undefined
   repo: string
   docsDir: string | undefined
   force: boolean
   interactive: boolean
   localCmd: string | undefined
+  ollamaModel: string | undefined
+  ollamaUrl: string | undefined
 } {
   const args = argv.slice(2)
   let command: string | undefined
-  let provider: "gemini" | "claude" | "openai" | "local" = "gemini"
+  let provider: "gemini" | "claude" | "openai" | "local" | "ollama" = "gemini"
   let apiKey: string | undefined
   let repo = process.cwd()
   let docsDir: string | undefined
   let force = false
   let interactive = false
   let localCmd: string | undefined
+  let ollamaModel: string | undefined
+  let ollamaUrl: string | undefined
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
@@ -76,10 +86,11 @@ function parseArgs(argv: string[]): {
         val !== "gemini" &&
         val !== "claude" &&
         val !== "openai" &&
-        val !== "local"
+        val !== "local" &&
+        val !== "ollama"
       ) {
         fatal(
-          `Unknown provider: ${val}. Must be gemini, claude, openai, or local.`,
+          `Unknown provider: ${val}. Must be gemini, claude, openai, ollama, or local.`,
         )
       }
       provider = val
@@ -95,6 +106,12 @@ function parseArgs(argv: string[]): {
       i++
     } else if (arg === "--local-cmd" && args[i + 1]) {
       localCmd = args[i + 1]!
+      i++
+    } else if (arg === "--ollama-model" && args[i + 1]) {
+      ollamaModel = args[i + 1]!
+      i++
+    } else if (arg === "--ollama-url" && args[i + 1]) {
+      ollamaUrl = args[i + 1]!
       i++
     } else if (arg === "--force") {
       force = true
@@ -120,6 +137,8 @@ function parseArgs(argv: string[]): {
     force,
     interactive,
     localCmd,
+    ollamaModel,
+    ollamaUrl,
   }
 }
 
@@ -215,6 +234,8 @@ async function main() {
     force,
     interactive,
     localCmd,
+    ollamaModel,
+    ollamaUrl,
   } = parseArgs(process.argv)
 
   if (!command) {
@@ -267,9 +288,98 @@ async function main() {
     return
   }
 
+  if (command === "brain-init") {
+    const { cpSync, mkdirSync, existsSync, readdirSync, readFileSync } =
+      await import("node:fs")
+    const { join, dirname } = await import("node:path")
+    const { fileURLToPath } = await import("node:url")
+
+    const brainDir = `${repo}/brain`
+    if (existsSync(brainDir)) {
+      const existing = readdirSync(brainDir).filter((f: string) =>
+        f.endsWith(".md"),
+      )
+      if (existing.length > 0) {
+        console.log(
+          `\n⏭  brain/ already exists with ${existing.length} files.\n`,
+        )
+        return
+      }
+    }
+
+    mkdirSync(brainDir, { recursive: true })
+    mkdirSync(`${brainDir}/DECISIONS`, { recursive: true })
+
+    const templatesDir = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "brain-templates",
+    )
+    const templates = readdirSync(templatesDir).filter((f: string) =>
+      f.endsWith(".md"),
+    )
+
+    for (const file of templates) {
+      cpSync(join(templatesDir, file), join(brainDir, file))
+    }
+
+    console.log(`\n🧠 Created brain/ with ${templates.length} templates:\n`)
+    for (const file of templates) {
+      console.log(`   brain/${file}`)
+    }
+
+    // Wire into doc-map if it exists
+    const docMapPath = `${repo}/${docsDir ?? "docs"}/.doc-map.json`
+    if (existsSync(docMapPath)) {
+      const raw = readFileSync(docMapPath, "utf-8")
+      const docMap = JSON.parse(raw)
+      const brainFiles = templates.map((f: string) => `brain/${f}`)
+      let wired = 0
+      for (const [, entry] of Object.entries(docMap.docs ?? {})) {
+        const e = entry as { context_files?: string[] }
+        if (
+          e.context_files &&
+          !e.context_files.some((f: string) => f.startsWith("brain/"))
+        ) {
+          e.context_files.push(...brainFiles)
+          wired++
+        }
+      }
+      if (wired > 0) {
+        const { writeFileSync } = await import("node:fs")
+        writeFileSync(docMapPath, `${JSON.stringify(docMap, null, 2)}\n`)
+        console.log(`\n   ✓ Wired brain/ into ${wired} doc(s) in .doc-map.json`)
+      }
+    }
+
+    console.log(
+      "\n   Fill in the brain docs — they feed into every compilation.",
+    )
+    console.log("   ▶ Next: /wf-brain claude\n")
+    return
+  }
+
+  if (command === "authors") {
+    const { resolveConfig, loadDocMap } = await import("./config")
+    const { generateAuthors } = await import("./authors")
+
+    const config = resolveConfig(
+      repo,
+      docsDir ? `${repo}/${docsDir}` : undefined,
+    )
+    const docMap = loadDocMap(config.docMapPath)
+
+    console.log("\n👥 Generating AUTHORS.md...\n")
+    const authorsPath = generateAuthors(config.docsDir, docMap, repo)
+    console.log(`✅ ${authorsPath}\n`)
+    return
+  }
+
   if (command === "index") {
     const resolvedKey =
-      provider === "local" ? "" : resolveApiKey(provider, apiKey)
+      provider === "local" || provider === "ollama"
+        ? ""
+        : resolveApiKey(provider, apiKey)
     const { resolveConfig, loadDocMap } = await import("./config")
     const { createProviders } = await import("./providers")
     const { generateIndex } = await import("./indexer")
@@ -283,6 +393,9 @@ async function main() {
       provider,
       apiKey: resolvedKey,
       localCmd,
+      triageModel: ollamaModel,
+      compileModel: ollamaModel,
+      ollamaUrl,
     })
 
     console.log("\n📇 Generating INDEX.md...\n")
@@ -290,8 +403,103 @@ async function main() {
       config.docsDir,
       docMap,
       providers.triage,
+      repo,
     )
     console.log(`✅ ${indexPath}\n`)
+    return
+  }
+
+  if (command === "status") {
+    const { resolveConfig, loadDocMap } = await import("./config")
+    const { loadHashes, computeDocHashes, diffHashes } = await import(
+      "./hashes"
+    )
+    const { getLastSyncCommit } = await import("./git")
+    const { readdirSync } = await import("node:fs")
+    const { join } = await import("node:path")
+
+    const config = resolveConfig(
+      repo,
+      docsDir ? `${repo}/${docsDir}` : undefined,
+    )
+
+    let docMap: ReturnType<typeof loadDocMap>
+    try {
+      docMap = loadDocMap(config.docMapPath)
+    } catch {
+      console.log("\n✗ No .doc-map.json found. Run 'wiki-forge init' first.\n")
+      process.exit(1)
+    }
+
+    const lastSync = getLastSyncCommit(config.lastSyncPath, repo)
+    const allHashes = loadHashes(config.docsDir)
+
+    const entries = Object.entries(docMap.docs).filter(([, e]) => e != null)
+    const compiled = entries.filter(([, e]) => e!.type === "compiled")
+    const healthChecks = entries.filter(([, e]) => e!.type === "health-check")
+
+    let driftCount = 0
+    const lines: string[] = []
+
+    for (const [docPath, entry] of entries) {
+      if (!entry) continue
+      if (entry.type === "health-check") {
+        lines.push(`  ⚠ ${docPath.padEnd(24)} — health-check`)
+        continue
+      }
+      const currentHashes = computeDocHashes(
+        entry.sources,
+        entry.context_files,
+        repo,
+      )
+      const previousHashes = allHashes[docPath] ?? {}
+      const hashDiff = diffHashes(previousHashes, currentHashes)
+
+      if (Object.keys(previousHashes).length === 0) {
+        lines.push(`  ○ ${docPath.padEnd(24)} — not yet compiled`)
+        driftCount++
+      } else if (hashDiff.changed) {
+        const n =
+          hashDiff.changedFiles.length +
+          hashDiff.addedFiles.length +
+          hashDiff.removedFiles.length
+        lines.push(`  ⚡ ${docPath.padEnd(24)} — ${n} file(s) changed`)
+        driftCount++
+      } else {
+        lines.push(`  ✓ ${docPath.padEnd(24)} — up to date`)
+      }
+    }
+
+    const countFiles = (dir: string) => {
+      try {
+        return readdirSync(join(config.docsDir, dir)).filter((f: string) =>
+          f.endsWith(".md"),
+        ).length
+      } catch {
+        return 0
+      }
+    }
+    const entityCount = countFiles("entities")
+    const conceptCount = countFiles("concepts")
+
+    console.log("\n📊 wiki-forge status")
+    console.log(`   Last sync: ${lastSync.slice(0, 7)}`)
+    console.log(`   Docs dir:  ${config.docsDir}\n`)
+    console.log("   Documents:")
+    for (const l of lines) console.log(`  ${l}`)
+    console.log()
+    if (entityCount > 0 || conceptCount > 0) {
+      console.log(`   Wiki: ${entityCount} entities, ${conceptCount} concepts`)
+    }
+    console.log(
+      `   Total: ${entries.length} docs (${compiled.length} compiled, ${healthChecks.length} health-check)`,
+    )
+    if (driftCount > 0) {
+      console.log(`   ⚡ ${driftCount} doc(s) drifted\n`)
+    } else {
+      console.log("   ✅ All up to date\n")
+    }
+
     return
   }
 
@@ -301,12 +509,17 @@ async function main() {
   }
 
   const resolvedKey =
-    provider === "local" ? "" : resolveApiKey(provider, apiKey)
+    provider === "local" || provider === "ollama"
+      ? ""
+      : resolveApiKey(provider, apiKey)
 
   const providerConfig: ProviderConfig = {
     provider,
     apiKey: resolvedKey,
     localCmd,
+    triageModel: ollamaModel,
+    compileModel: ollamaModel,
+    ollamaUrl,
   }
 
   const mode = command as "check" | "compile" | "health"

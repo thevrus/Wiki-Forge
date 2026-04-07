@@ -10,7 +10,7 @@ Use for major transitions.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Stage names: `INTERVIEW`, `SCANNING`, `SUGGESTING`, `COMPILING`, `EXTRACTING`, `INDEXING`, `DONE`
+Stage names: `INTERVIEW`, `SCANNING`, `SUGGESTING`, `COMPILING`, `EXTRACTING`, `INDEXING`, `STATUS`, `CHECKING`, `BRIEF`, `TICKET`, `QA`, `DONE`
 
 ## Selection Box
 

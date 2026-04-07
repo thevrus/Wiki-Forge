@@ -109,8 +109,21 @@ Write current `git rev-parse HEAD` to `docs/.last-sync`.
 
 ## Style guide for compiled docs
 
-**Format:**
-- YAML frontmatter: `description` (one sentence), `sources` (list), `compiled_at` (ISO timestamp)
+**Frontmatter:**
+Every compiled doc MUST start with YAML frontmatter:
+```yaml
+---
+title: "Human-readable page title"
+slug: url-safe-lowercase-slug
+category: compiled
+icon: emoji representing the content (e.g. 🏗️ for architecture)
+description: "One-sentence summary for SEO and previews"
+sources: ["src/services/", "src/api/"]
+compiled_at: "ISO timestamp"
+---
+```
+
+**Body format:**
 - Open with a 2-3 sentence summary paragraph
 - Use ## for major sections, ### for subsections
 

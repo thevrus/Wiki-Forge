@@ -1,6 +1,6 @@
 {
   "name": "wiki-forge",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Keep your docs in sync with your code. LLM-powered documentation compiler.",
   "type": "module",
   "bin": {
@@ -12,11 +12,12 @@
   "files": [
     "dist",
     "commands",
+    "brain-templates",
     "action.yml",
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --external react-devtools-core && bun build src/index.ts --outfile dist/index.js --target node && bun build src/action.ts --outfile dist/action.js --target node --external react-devtools-core",
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node && bun build src/index.ts --outfile dist/index.js --target node && bun build src/action.ts --outfile dist/action.js --target node",
     "dev": "bun run src/cli.ts",
     "check": "biome check src/",
     "format": "biome check --fix src/",

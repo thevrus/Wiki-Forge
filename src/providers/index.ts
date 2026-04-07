@@ -1,6 +1,7 @@
 import { createClaudeProvider } from "./claude"
 import { createGeminiProvider } from "./gemini"
 import { createLocalProvider } from "./local"
+import { createOllamaProvider } from "./ollama"
 import { createOpenAIProvider } from "./openai"
 import type { LLMProvider, ProviderConfig } from "./types"
 
@@ -17,6 +18,8 @@ export function createProviders(config: ProviderConfig): {
       return createClaudeProvider(config)
     case "openai":
       return createOpenAIProvider(config)
+    case "ollama":
+      return createOllamaProvider(config)
     case "local":
       return createLocalProvider(config.localCmd)
   }
