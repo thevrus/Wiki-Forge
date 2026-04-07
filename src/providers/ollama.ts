@@ -13,9 +13,11 @@ export function createOllamaProvider(config: ProviderConfig): {
       const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(10 * 60 * 1000), // 10 minutes
         body: JSON.stringify({
           model,
           stream: false,
+          keep_alive: "10m",
           options: { temperature: 0.1 },
           messages: [
             ...(system ? [{ role: "system", content: system }] : []),
