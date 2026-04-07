@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs"
-
+import pc from "picocolors"
 import type { DocEntry } from "./config"
 import { loadDocMap, resolveConfig } from "./config"
 import type { Contributor } from "./git"
@@ -17,6 +17,7 @@ import {
   updateHashesForDoc,
 } from "./hashes"
 import { generateIndex } from "./indexer"
+import * as log from "./logger"
 import { createProviders } from "./providers"
 import type { LLMProvider, ProviderConfig } from "./providers/types"
 import type { GatherResult } from "./sources"
@@ -333,7 +334,6 @@ export async function orchestrate(
   for (const [docPath, entry] of entries) {
     if (!entry) continue
     current++
-    const progress = `[${current}/${total}]`
 
     const fullDocPath = docPath.startsWith("/")
       ? docPath
@@ -343,18 +343,21 @@ export async function orchestrate(
     // Health-check type docs
     if (entry.type === "health-check") {
       if (mode === "compile" || mode === "health") {
-        console.log(`${progress} 🏥 Health-checking ${docPath}...`)
+        const spinner = log.spin(
+          `${log.progress(current, total, "")} Health-checking ${docPath}`,
+        )
         const issues = await runHealthCheck(
           entry,
           currentDoc,
           repoRoot,
           providers.triage,
         )
+        spinner.stop()
         if (issues.length > 0) {
           result.healthIssues.push({ doc: docPath, issues })
-          console.log(`${progress} ⚠  ${docPath} — ${issues.length} issue(s)`)
+          log.warn(`${docPath} — ${issues.length} issue(s)`)
         } else {
-          console.log(`${progress} ✅ ${docPath} — healthy`)
+          log.success(`${docPath} — healthy`)
         }
       }
       continue
@@ -375,7 +378,7 @@ export async function orchestrate(
     const hasChanges = forceRecompile || hashDiff.changed
 
     if (!hasChanges) {
-      console.log(`${progress} ⏭  ${docPath} — no changes`)
+      log.skip(`${docPath} — no changes`)
       result.triageResults.push({
         doc: docPath,
         drifted: false,
@@ -394,13 +397,15 @@ export async function orchestrate(
         delta.length > 0
           ? `${delta.length} file(s) changed: ${delta.slice(0, 3).join(", ")}${delta.length > 3 ? "..." : ""}`
           : "Force check"
-      console.log(`${progress} ⚡ ${docPath} — ${reason}`)
+      log.drift(`${docPath} — ${reason}`)
       result.triageResults.push({ doc: docPath, drifted: true, reason })
       continue
     }
 
     if (forceRecompile) {
-      console.log(`${progress} 📝 Summarizing ${docPath}...`)
+      const spinner = log.spin(
+        log.progress(current, total, `Compiling ${docPath}`),
+      )
       const t0 = Date.now()
       const updated = await runFullRecompile(
         entry,
@@ -411,20 +416,21 @@ export async function orchestrate(
         providers.triage,
         providers.compile,
       )
+      spinner.stop()
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       const validation = validateCompiledOutput(updated)
       if (validation.warnings.length > 0) {
-        for (const w of validation.warnings) console.log(`   ⚠  ${w}`)
+        for (const w of validation.warnings) log.warn(w)
       }
       if (!validation.valid) {
-        console.log(`${progress} ✗ ${docPath} — rejected (invalid output)`)
+        log.error(`${docPath} — rejected (invalid output)`)
         result.triageResults.push({
           doc: docPath,
           drifted: true,
           reason: `Rejected: ${validation.warnings[0]}`,
         })
       } else {
-        console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
+        log.success(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
         writeFileSync(fullDocPath, `${validation.cleaned}\n`)
         result.updatedDocs.push(docPath)
         result.docDiffs.push({
@@ -443,8 +449,12 @@ export async function orchestrate(
       // Diff-only recompile: send previous doc + git diff (not full source)
       const affectedFiles = [...hashDiff.changedFiles, ...hashDiff.addedFiles]
       const nChanged = affectedFiles.length + hashDiff.removedFiles.length
-      console.log(
-        `${progress} 📝 Recompiling ${docPath} (${nChanged} file(s) changed)...`,
+      const spinner = log.spin(
+        log.progress(
+          current,
+          total,
+          `Compiling ${docPath} (${nChanged} changed)`,
+        ),
       )
       const t0 = Date.now()
       const updated = await runDiffRecompile(
@@ -456,20 +466,21 @@ export async function orchestrate(
         styleGuide,
         providers.compile,
       )
+      spinner.stop()
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       const validation = validateCompiledOutput(updated)
       if (validation.warnings.length > 0) {
-        for (const w of validation.warnings) console.log(`   ⚠  ${w}`)
+        for (const w of validation.warnings) log.warn(w)
       }
       if (!validation.valid) {
-        console.log(`${progress} ✗ ${docPath} — rejected (invalid output)`)
+        log.error(`${docPath} — rejected (invalid output)`)
         result.triageResults.push({
           doc: docPath,
           drifted: true,
           reason: `Rejected: ${validation.warnings[0]}`,
         })
       } else {
-        console.log(`${progress} ✅ Compiled ${docPath} (${elapsed}s)`)
+        log.success(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
         writeFileSync(fullDocPath, `${validation.cleaned}\n`)
         result.updatedDocs.push(docPath)
         result.docDiffs.push({
@@ -497,28 +508,31 @@ export async function orchestrate(
 
   // Post-compilation: wiki pages, index, and log
   if (mode === "compile") {
-    console.log("\n🧠 Extracting entities & concepts...")
+    let spinner = log.spin("Extracting entities & concepts")
     const wikiResult = await generateWiki(
       config.docsDir,
       docMap,
       providers.triage,
       repoRoot,
     )
+    spinner.stop()
     if (wikiResult.entities > 0 || wikiResult.concepts > 0) {
-      console.log(
-        `   ${wikiResult.entities} entities, ${wikiResult.concepts} concepts`,
+      log.success(
+        `${wikiResult.entities} entities, ${wikiResult.concepts} concepts`,
       )
     }
 
-    console.log("📇 Generating INDEX.md...")
+    spinner = log.spin("Generating INDEX.md")
     await generateIndex(config.docsDir, docMap, providers.triage, repoRoot)
+    spinner.stop()
+    log.success("INDEX.md")
 
     appendCompilationLog(config.docsDir, {
       updatedDocs: result.updatedDocs,
       healthIssues: result.healthIssues,
       wiki: wikiResult,
     })
-    console.log("📋 Updated log.md\n")
+    log.success("log.md")
   }
 
   return result
@@ -552,15 +566,12 @@ async function runDiffRecompile(
 }
 
 function logGatherReport(gather: GatherResult): void {
-  const sizeKb = Math.round(gather.totalSize / 1024)
-  console.log(
-    `   📂 ${gather.fileCount} files read (${sizeKb}KB)${gather.skippedByPriority > 0 ? `, ${gather.skippedByPriority} skipped (cap)` : ""}`,
+  log.gatherReport(
+    gather.fileCount,
+    gather.totalSize,
+    gather.truncatedFiles,
+    gather.skippedByPriority,
   )
-  if (gather.truncatedFiles.length > 0) {
-    console.log(
-      `   ⚠  ${gather.truncatedFiles.length} file(s) truncated: ${gather.truncatedFiles.slice(0, 3).join(", ")}${gather.truncatedFiles.length > 3 ? "..." : ""}`,
-    )
-  }
 }
 
 function singlePassPrompt(

@@ -3,7 +3,7 @@
 import { orchestrate } from "./orchestrate"
 import type { ProviderConfig } from "./providers/types"
 
-const VERSION = "0.1.0"
+const VERSION = "0.3.0"
 
 const HELP = `
 wiki-forge v${VERSION}
@@ -701,12 +701,11 @@ async function main() {
 
   const mode = command as "check" | "compile" | "health"
 
-  console.log(`\n📚 wiki-forge — ${mode} mode`)
-  console.log(`   Provider: ${provider}`)
-  console.log(`   Repo: ${repo}`)
-  if (docsDir) console.log(`   Docs: ${docsDir}`)
-  if (force) console.log(`   ⚡ Force recompile: all docs`)
-  console.log()
+  const log = await import("./logger")
+  const pc = (await import("picocolors")).default
+
+  log.header(mode, provider, repo)
+  if (force) log.info(pc.yellow("Force recompile: all docs"))
 
   try {
     const result = await orchestrate({
@@ -717,44 +716,40 @@ async function main() {
       mode,
     })
 
-    // Print triage results
-    if (result.triageResults.length > 0) {
-      console.log("🔍 Triage results:")
-      for (const t of result.triageResults) {
-        const icon = t.drifted ? "⚡" : "✅"
-        console.log(`   ${icon} ${t.doc} — ${t.reason}`)
-      }
-      console.log()
-    }
+    // Summary
+    const summaryLines: string[] = []
 
-    // Print updated docs
     if (result.updatedDocs.length > 0) {
-      console.log("📚 Updated docs:")
-      for (const doc of result.updatedDocs) {
-        console.log(`   ✅ ${doc}`)
-      }
-      console.log()
+      summaryLines.push(
+        `${pc.green("✓")} ${pc.bold(`${result.updatedDocs.length}`)} doc(s) compiled`,
+      )
     } else if (mode === "compile") {
-      console.log("✅ All docs are up to date.\n")
+      summaryLines.push(`${pc.green("✓")} All docs up to date`)
     }
 
-    // Print health issues
+    const drifted = result.triageResults.filter((t) => t.drifted).length
+    if (mode === "check" && drifted > 0) {
+      summaryLines.push(`${pc.magenta("⚡")} ${drifted} doc(s) drifted`)
+    }
+
     if (result.healthIssues.length > 0) {
-      console.log("⚠  Health issues:")
+      summaryLines.push(
+        `${pc.yellow("⚠")} ${result.healthIssues.length} health issue(s)`,
+      )
       for (const h of result.healthIssues) {
-        console.log(`   ${h.doc}:`)
         for (const issue of h.issues) {
-          console.log(`     - ${issue}`)
+          summaryLines.push(`  ${pc.dim(h.doc)}: ${issue}`)
         }
       }
-      console.log()
     } else if (mode === "health") {
-      console.log("✅ All health checks passed.\n")
+      summaryLines.push(`${pc.green("✓")} All health checks passed`)
     }
+
+    log.summary(summaryLines)
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown error occurred"
-    console.error(`\n⚠  ${message}\n`)
+    log.error(message)
     process.exit(1)
   }
 }
