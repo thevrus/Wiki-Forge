@@ -1,6 +1,14 @@
 Initialize a wiki-forge documentation wiki for this repository.
 
+Follow the UI patterns from @commands/ui-brand.md for all output formatting.
+
 ## Phase 1: Understand the project
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► INTERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
 
 Read the README (if it exists) and package.json first. Then ask **just 2 questions** (wait for each answer):
 
@@ -12,16 +20,25 @@ Read the README (if it exists) and package.json first. Then ask **just 2 questio
 
 ## Phase 2: Scan the codebase
 
-Now scan the repo structure:
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► SCANNING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 - Read the top-level and one-level-deep directories (skip node_modules, dist, build, .git)
 - Read package.json, README, and any config files for context
 - Identify the tech stack, framework, and project type
 
 ## Phase 3: Suggest docs
 
-Based on BOTH the interview answers AND the directory structure, suggest documentation pages. For each suggestion, explain WHY this doc matters for the audience they described.
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► SUGGESTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
 
-Show ALL suggestions at once as a numbered list. Include custom docs informed by the interview — don't just use the standard templates.
+Based on BOTH the interview answers AND the directory structure, suggest documentation pages.
 
 Standard templates to consider (only if relevant):
 - ARCHITECTURE.md — Always
@@ -32,24 +49,28 @@ Standard templates to consider (only if relevant):
 - DECISIONS.md (health-check) — When the user mentions decisions or trade-offs
 - Custom docs based on interview answers (e.g. INJECTION.md, BILLING.md)
 
-Format the full list like:
+Display using the selection box pattern:
 
 ```
-Here's what I'd generate (all included by default):
+╔══════════════════════════════════════════════════════════════╗
+║  SELECT DOCS                                                 ║
+╚══════════════════════════════════════════════════════════════╝
 
-  1. 📄 ARCHITECTURE.md — "How Layer is structured: WXT, background script, popup, storage"
-  2. 📄 PRODUCT.md — "User-facing features: popup, rule editor, code editor"
-  3. 📄 DATA.md — "Rule model, browser storage, URL pattern matching"
-  4. 📄 INJECTION.md — "How CSS/JS gets injected via Chrome scripting API"
+  ✓  1. ARCHITECTURE.md — "System overview and WXT config"
+  ✓  2. PRODUCT.md — "Popup UI, rule editor, code editor"
+  ✓  3. DATA.md — "Rule model, storage, URL matching"
+  ✓  4. INJECTION.md — "CSS/JS injection via Chrome API"
 
-Drop any? (type numbers to remove, or Enter to keep all)
+──────────────────────────────────────────────────────────────
+→ All included. Drop any? (numbers to remove, or Enter)
+──────────────────────────────────────────────────────────────
 ```
 
-**ONE confirmation, not one per doc.** Default is keep all. User only types if they want to remove something.
+**ONE confirmation, not one per doc.** Default is keep all.
 
 ## Phase 4: Write
 
-After confirmation, immediately write everything — no additional questions about directory (default: `docs/`) or style preferences. Keep it fast.
+After confirmation, immediately write everything. Default directory: `docs/`.
 
 Create `{docs_dir}/.doc-map.json` with the confirmed docs. Each entry should have:
 - **description** — specific to THIS project, informed by the interview (not generic)
@@ -66,4 +87,14 @@ Also create the directory structure:
   synthesis/
 ```
 
-End with: **"Setup complete. Run `/wf-compile --force` to generate your wiki."**
+Show completion:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► DONE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ✓ Created docs/.doc-map.json with {N} docs
+
+  ▶ Next: /wf-compile --force
+```

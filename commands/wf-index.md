@@ -1,12 +1,20 @@
 Regenerate the INDEX.md master index from existing compiled docs.
 
+Follow the UI patterns from @commands/ui-brand.md for all output formatting.
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► INDEXING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
 ## Steps
 
-1. Read `docs/.doc-map.json` to know which docs exist.
+1. Find the docs directory — look for `.doc-map.json` in `docs/`, `wiki/`, or the repo root.
 
 2. Read each compiled doc file from the docs directory.
 
-3. Write `docs/INDEX.md` with this structure:
+3. Write `INDEX.md` with this structure:
 
 ```markdown
 ---
@@ -15,34 +23,39 @@ generated_at: "{ISO timestamp}"
 
 # Wiki Index
 
-This wiki is compiled from the codebase by Wiki Forge. Each document reflects the current state of the code.
+This wiki is compiled from the codebase by Wiki Forge.
 
 ## Compiled Documents
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — {one-sentence summary of what this doc contains}
-- **[PRODUCT.md](PRODUCT.md)** — {one-sentence summary}
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — {one-sentence summary of actual content}
 
 ## Health-Checked Documents
 
-- **[DECISIONS.md](DECISIONS.md)** *(human-written, auto-checked)* — {one-sentence summary}
+- **[DECISIONS.md](DECISIONS.md)** *(human-written)* — {one-sentence summary}
 
 ## Entities
 
 - [booking service](entities/booking-service.md)
-- [payment gateway](entities/payment-gateway.md)
 
 ## Concepts
 
 - [authentication flow](concepts/authentication-flow.md)
-- [fee calculation](concepts/fee-calculation.md)
 
 ## Synthesis
 
 - [fees explained](synthesis/fees-explained.md)
 ```
 
-4. The summaries should be specific and factual — not the description from the doc map, but an actual summary of what the compiled doc contains. Read each doc to write the summary.
+4. Summaries must be specific — read each doc and summarize what it actually contains, not the description from the doc map.
 
 5. List all `.md` files in `entities/`, `concepts/`, and `synthesis/` directories.
 
 6. Show the user the generated INDEX.md contents.
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ wiki-forge ► DONE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ✓ INDEX.md generated ({N} docs, {N} entities, {N} concepts)
+```
