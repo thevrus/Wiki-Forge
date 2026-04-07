@@ -11,36 +11,8 @@ import { getDiffForFiles } from "./git"
 
 const TRAILING_GLOB = /[/*]+$/
 
-// Higher priority = read first (business logic before config/types)
-const PRIORITY_PATTERNS: Array<{ pattern: RegExp; priority: number }> = [
-  // Business logic, services, core — read these first
-  {
-    pattern: /\/(services?|domain|core|rules|handlers?|controllers?)\//,
-    priority: 100,
-  },
-  { pattern: /\/(api|routes?|endpoints?)\//, priority: 90 },
-  { pattern: /\/(models?|schemas?|entities)\//, priority: 80 },
-  { pattern: /\/(hooks?|composables?|providers?)\//, priority: 70 },
-  { pattern: /\/(components?|views?|screens?|pages?)\//, priority: 60 },
-  { pattern: /\/(utils?|helpers?|lib)\//, priority: 50 },
-  // Types and config — still useful context but lower priority
-  { pattern: /\/(types?|interfaces?)\//, priority: 30 },
-  { pattern: /\/(config|constants?)\//, priority: 25 },
-  // Tooling config — read last, only if room
-  { pattern: /package\.json$/, priority: 15 },
-  { pattern: /tsconfig/, priority: 5 },
-  { pattern: /turbo\.json$/, priority: 5 },
-  { pattern: /(biome|eslint|prettier)/, priority: 5 },
-  { pattern: /(webpack|vite|metro|babel)\.config/, priority: 5 },
-  { pattern: /\.(husky|github)\//, priority: 5 },
-]
-
-function filePriority(path: string): number {
-  for (const { pattern, priority } of PRIORITY_PATTERNS) {
-    if (pattern.test(path)) return priority
-  }
-  return 40 // default: between config and utils
-}
+// No priority ranking — all source files are equally important.
+// Doc-map splitting handles focus: each doc has its own focused sources.
 
 export function fileMatchesSources(
   filePath: string,
@@ -127,9 +99,7 @@ export function gatherFullSource(
   }
 
   // Deduplicate and sort by priority (high priority first)
-  const unique = [...new Set(allFiles)].sort(
-    (a, b) => filePriority(b) - filePriority(a),
-  )
+  const unique = [...new Set(allFiles)]
 
   if (unique.length === 0) {
     return {
