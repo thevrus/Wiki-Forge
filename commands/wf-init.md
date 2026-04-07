@@ -2,28 +2,13 @@ Initialize a wiki-forge documentation wiki for this repository.
 
 ## Phase 1: Understand the project
 
-Before scanning anything, interview the user. Ask these questions ONE AT A TIME (wait for each answer):
+Read the README (if it exists) and package.json first. Then ask **just 2 questions** (wait for each answer):
 
-1. **"What does this project do in one sentence?"**
-   - If a README exists, read it first and propose an answer. Let them correct it.
+1. **Propose a one-sentence summary** based on the README. Ask: "Is this right, or would you tweak it?"
 
-2. **"Who needs to understand this codebase but can't read the code?"**
-   - Examples: PMs, designers, new engineers, QA, clients, investors
-   - This determines the writing style
-
-3. **"What questions do those people ask you most often?"**
-   - Examples: "How does X work?", "What are the rules for Y?", "What changed recently?"
-   - These become the docs
-
-4. **"What parts of the codebase are the most confusing or undocumented?"**
-   - These get priority in the doc map
-
-5. **"Are there business rules or constraints that aren't obvious from the code?"**
-   - Fees, limits, eligibility, approval flows, edge cases
-   - These go into BUSINESS_RULES.md
-
-6. **"Anything that should NOT be documented?"**
-   - Internal tools, deprecated code, sensitive logic
+2. **"Who's this wiki for, and what do they usually ask you about the codebase?"**
+   - Let them answer freely. This single answer tells you: audience, writing style, and which docs to generate.
+   - If the answer is short ("everyone", "all"), that's fine — use your best judgment from the code.
 
 ## Phase 2: Scan the codebase
 
@@ -36,46 +21,43 @@ Now scan the repo structure:
 
 Based on BOTH the interview answers AND the directory structure, suggest documentation pages. For each suggestion, explain WHY this doc matters for the audience they described.
 
-Format each suggestion like:
+Show ALL suggestions at once as a numbered list. Include custom docs informed by the interview — don't just use the standard templates.
+
+Standard templates to consider (only if relevant):
+- ARCHITECTURE.md — Always
+- PRODUCT.md — When there's UI
+- BUSINESS_RULES.md — When there's validation, pricing, limits
+- DATA.md — When there are data models, schemas, databases
+- API.md — When there are API endpoints
+- DECISIONS.md (health-check) — When the user mentions decisions or trade-offs
+- Custom docs based on interview answers (e.g. INJECTION.md, BILLING.md)
+
+Format the full list like:
 
 ```
-📄 PRODUCT.md
-   "User-facing screens, flows, and features in the popup UI"
-   Sources: src/components/, src/popup/
-   Why: You mentioned PMs ask "what does the extension do?" — this answers that.
-   Include? [Y/n/edit]
+Here's what I'd generate (all included by default):
+
+  1. 📄 ARCHITECTURE.md — "How Layer is structured: WXT, background script, popup, storage"
+  2. 📄 PRODUCT.md — "User-facing features: popup, rule editor, code editor"
+  3. 📄 DATA.md — "Rule model, browser storage, URL pattern matching"
+  4. 📄 INJECTION.md — "How CSS/JS gets injected via Chrome scripting API"
+
+Drop any? (type numbers to remove, or Enter to keep all)
 ```
 
-Standard suggestions to consider (only if relevant):
+**ONE confirmation, not one per doc.** Default is keep all. User only types if they want to remove something.
 
-| Doc | When to suggest |
-|---|---|
-| ARCHITECTURE.md | Always — system overview |
-| PRODUCT.md | When there's UI (components, pages, screens) |
-| BUSINESS_RULES.md | When there's validation, pricing, limits, or constraints |
-| DATA.md | When there are data models, schemas, databases |
-| API.md | When there are API endpoints or routes |
-| DECISIONS.md (health-check) | When the user mentions past decisions or trade-offs |
+## Phase 4: Write
 
-Also suggest custom docs based on the interview. If they said "people always ask about the billing flow," suggest a **BILLING.md** — don't force it into a generic category.
-
-## Phase 4: Customize
-
-After the user confirms their selection:
-
-1. Ask: **"What directory for the wiki?"** (default: `docs/`)
-2. Ask: **"Any style preferences?"** — e.g. "more technical", "include code examples", "keep it very short". Store this in the `style` field.
-
-## Phase 5: Write
+After confirmation, immediately write everything — no additional questions about directory (default: `docs/`) or style preferences. Keep it fast.
 
 Create `{docs_dir}/.doc-map.json` with the confirmed docs. Each entry should have:
 - **description** — specific to THIS project, informed by the interview (not generic)
 - **type** — `"compiled"` or `"health-check"`
 - **sources** — directories that feed this doc
 - **context_files** — always-included files (package.json, config files)
-- **style** (optional, top-level) — if the user gave style preferences
 
-Also create:
+Also create the directory structure:
 ```
 {docs_dir}/
   .doc-map.json
