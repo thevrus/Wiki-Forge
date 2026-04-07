@@ -180,6 +180,116 @@ export function getRecentChanges(
   }
 }
 
+// ── Ticket extraction ─────────────────────────────────────────────────
+
+export type TicketReference = {
+  ticket: string // e.g. "CXC-1080", "#198"
+  message: string // commit message
+  author: string
+  date: string // YYYY-MM-DD
+  files: string[] // files touched in that commit
+}
+
+// Matches tickets from any tracker:
+//   Jira/Linear/Shortcut: CXC-1080, ENG-42, FE-123, PROJ-7
+//   GitHub PRs: (#198), #123
+const TICKET_PATTERNS = [
+  /\b([A-Z][A-Z0-9]+-\d+)\b/g, // Jira, Linear, Shortcut: CXC-1080, ENG-42
+  /\(#(\d+)\)/g, // GitHub PR: (#198)
+  /(?:^|\s)#(\d+)\b/g, // Standalone: #123
+]
+
+function extractTickets(text: string): string[] {
+  const tickets = new Set<string>()
+  for (const pattern of TICKET_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const ticket = match[1]!
+      // For pure numbers from GitHub PRs, prefix with #
+      tickets.add(/^\d+$/.test(ticket) ? `#${ticket}` : ticket)
+    }
+  }
+  return Array.from(tickets)
+}
+
+export function getTicketsForPaths(
+  paths: string[],
+  repoRoot: string,
+  days = 180,
+): TicketReference[] {
+  if (paths.length === 0) return []
+
+  try {
+    const pathArgs = paths.map((p) => `"${p}"`).join(" ")
+    const output = execSync(
+      `git log --since="${days} days ago" --format="COMMIT|%aN|%aI|%s" --name-only -- ${pathArgs}`,
+      { encoding: "utf-8", cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
+    ).trim()
+
+    if (!output) return []
+
+    const tickets: TicketReference[] = []
+    let currentAuthor = ""
+    let currentDate = ""
+    let currentMessage = ""
+    let currentTickets: string[] = []
+    let currentFiles: string[] = []
+
+    for (const line of output.split("\n")) {
+      if (line.startsWith("COMMIT|")) {
+        // Flush previous commit
+        if (currentTickets.length > 0 && currentFiles.length > 0) {
+          for (const ticket of currentTickets) {
+            tickets.push({
+              ticket,
+              message: currentMessage,
+              author: currentAuthor,
+              date: currentDate,
+              files: [...currentFiles],
+            })
+          }
+        }
+
+        const parts = line.slice(7).split("|")
+        currentAuthor = parts[0] ?? ""
+        currentDate = (parts[1] ?? "").slice(0, 10)
+        currentMessage = parts.slice(2).join("|")
+        currentTickets = extractTickets(currentMessage)
+        currentFiles = []
+      } else if (line.trim()) {
+        currentFiles.push(line.trim())
+      }
+    }
+
+    // Flush last commit
+    if (currentTickets.length > 0 && currentFiles.length > 0) {
+      for (const ticket of currentTickets) {
+        tickets.push({
+          ticket,
+          message: currentMessage,
+          author: currentAuthor,
+          date: currentDate,
+          files: [...currentFiles],
+        })
+      }
+    }
+
+    // Deduplicate by ticket, keep the most recent
+    const seen = new Map<string, TicketReference>()
+    for (const ref of tickets) {
+      const existing = seen.get(ref.ticket)
+      if (!existing || ref.date > existing.date) {
+        seen.set(ref.ticket, ref)
+      }
+    }
+
+    return Array.from(seen.values()).sort((a, b) =>
+      b.date.localeCompare(a.date),
+    )
+  } catch {
+    return []
+  }
+}
+
 export function getDiffForFiles(
   since: string,
   files: string[],

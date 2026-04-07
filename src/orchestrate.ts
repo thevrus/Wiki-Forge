@@ -2,12 +2,13 @@ import { readFileSync, writeFileSync } from "node:fs"
 import pc from "picocolors"
 import type { DocEntry } from "./config"
 import { loadDocMap, resolveConfig } from "./config"
-import type { Contributor } from "./git"
+import type { Contributor, TicketReference } from "./git"
 import {
   getCurrentCommit,
   getDiffForFiles,
   getDirectoryAuthors,
   getLastSyncCommit,
+  getTicketsForPaths,
 } from "./git"
 import {
   computeDocHashes,
@@ -239,6 +240,31 @@ function formatAuthorContext(contributors: Contributor[]): string {
   ].join("\n")
 }
 
+function formatTicketContext(tickets: TicketReference[]): string {
+  if (tickets.length === 0) return ""
+  const lines = tickets
+    .slice(0, 20)
+    .map((t) => `- ${t.ticket}: ${t.message} (${t.author}, ${t.date})`)
+  return [
+    "",
+    "## Related Tickets (from git history)",
+    "These tickets/PRs are linked to this area of the codebase. Use them to explain WHY things were built or changed.",
+    "Include ticket references naturally in the documentation where they add context (e.g. 'Retry logic was added per CXC-1080').",
+    ...lines,
+  ].join("\n")
+}
+
+function buildTicketsFrontmatter(tickets: TicketReference[]): string {
+  if (tickets.length === 0) return ""
+  const entries = tickets
+    .slice(0, 15)
+    .map(
+      (t) =>
+        `  - id: "${t.ticket}"\n    summary: "${t.message.replace(/"/g, '\\"').slice(0, 100)}"`,
+    )
+  return `related_tickets:\n${entries.join("\n")}`
+}
+
 function buildContributorsFrontmatter(contributors: Contributor[]): string {
   if (contributors.length === 0) return ""
   const entries = contributors
@@ -270,6 +296,25 @@ function injectContributorsFrontmatter(
 
   // No frontmatter — wrap the contributors block
   return `---\n${block}\n---\n\n${doc}`
+}
+
+function injectTicketsFrontmatter(
+  doc: string,
+  tickets: TicketReference[],
+): string {
+  if (tickets.length === 0) return doc
+  const block = buildTicketsFrontmatter(tickets)
+
+  if (doc.startsWith("---")) {
+    const closingIdx = doc.indexOf("---", 3)
+    if (closingIdx !== -1) {
+      const before = doc.slice(0, closingIdx).trimEnd()
+      const after = doc.slice(closingIdx)
+      return `${before}\n${block}\n${after}`
+    }
+  }
+
+  return doc
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -562,17 +607,19 @@ async function runDiffRecompile(
 ): Promise<string> {
   const diff = getDiffForFiles(lastSync, changedFiles, repoRoot)
   const contributors = getDirectoryAuthors(entry.sources, repoRoot)
+  const tickets = getTicketsForPaths(entry.sources, repoRoot)
   const authorContext = formatAuthorContext(contributors)
+  const ticketContext = formatTicketContext(tickets)
   const prompt = recompilePrompt(
     entry,
     currentDoc,
     diff,
     "",
     style,
-    authorContext,
+    `${authorContext}\n${ticketContext}`,
   )
   const result = await compileProvider.generate(prompt)
-  return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
+  return `${injectTicketsFrontmatter(injectContributorsFrontmatter(result.trim(), contributors), tickets)}\n`
 }
 
 function logGatherReport(gather: GatherResult): void {
@@ -629,21 +676,22 @@ async function runFullRecompile(
   logGatherReport(gather)
 
   const contributors = getDirectoryAuthors(entry.sources, repoRoot)
+  const tickets = getTicketsForPaths(entry.sources, repoRoot)
   const authorContext = formatAuthorContext(contributors)
+  const ticketContext = formatTicketContext(tickets)
+  const combinedContext = `${authorContext}\n${ticketContext}`
 
   let result: string
   if (singlePass) {
-    // Single LLM call: source → doc (for local/ollama where triage = compile)
     const prompt = singlePassPrompt(
       entry,
       currentDoc,
       gather.content,
       style,
-      authorContext,
+      combinedContext,
     )
     result = await compileProvider.generate(prompt)
   } else {
-    // Two-pass: source → summary → doc (for cloud providers with fast triage model)
     const summaryPrompt = summarizeSourcePrompt(entry, gather.content)
     const summary = await triageProvider.generate(summaryPrompt)
     const prompt = fullRecompilePrompt(
@@ -651,12 +699,16 @@ async function runFullRecompile(
       currentDoc,
       summary,
       style,
-      authorContext,
+      combinedContext,
     )
     result = await compileProvider.generate(prompt)
   }
 
-  return `${injectContributorsFrontmatter(result.trim(), contributors)}\n`
+  const withContributors = injectContributorsFrontmatter(
+    result.trim(),
+    contributors,
+  )
+  return `${injectTicketsFrontmatter(withContributors, tickets)}\n`
 }
 
 async function runHealthCheck(
