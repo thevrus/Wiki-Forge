@@ -19,8 +19,8 @@ export const DIFF_CAP = 100_000
 
 // ── Ollama ───────────────────────────────────────────────────────────
 
-/** Timeout in minutes for Ollama requests (large models are slow). */
-export const OLLAMA_TIMEOUT_MINUTES = 15
+/** Timeout in minutes for Ollama requests (large context = slow). */
+export const OLLAMA_TIMEOUT_MINUTES = 30
 
 // ── Excluded Patterns ────────────────────────────────────────────────
 
