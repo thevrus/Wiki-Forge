@@ -1,6 +1,10 @@
-# Wiki Forge
+<p align="center">
+  <img src="assets/logo.svg" alt="Wiki Forge" width="400" />
+</p>
 
-**Your codebase already knows everything. Your team shouldn't have to read it to find out.**
+<p align="center">
+  <strong>Your codebase already knows everything. Your team shouldn't have to read it to find out.</strong>
+</p>
 
 Wiki Forge compiles your source code into a plain-language wiki that PMs, designers, and new engineers can actually understand. When code changes, it detects drift and rewrites only what changed.
 
