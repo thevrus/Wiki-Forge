@@ -41,9 +41,6 @@ This wiki is compiled from the codebase by Wiki Forge.
 
 - [authentication flow](concepts/authentication-flow.md)
 
-## Synthesis
-
-- [fees explained](synthesis/fees-explained.md)
 ```
 
 4. Summaries must be specific — read each doc and summarize what it actually contains, not the description from the doc map.

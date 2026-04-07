@@ -84,7 +84,6 @@ Also create the directory structure:
   .doc-map.json
   entities/
   concepts/
-  synthesis/
 ```
 
 Show completion:

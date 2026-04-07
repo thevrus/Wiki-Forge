@@ -110,16 +110,6 @@ export async function generateIndex(
     lines.push("")
   }
 
-  // List synthesis pages
-  const synthesisFiles = listMdFiles(join(docsDir, "synthesis"))
-  if (synthesisFiles.length > 0) {
-    lines.push("## Synthesis", "")
-    for (const file of synthesisFiles) {
-      const name = file.replace(/\.md$/, "").replace(/-/g, " ")
-      lines.push(`- [${name}](synthesis/${file})`)
-    }
-    lines.push("")
-  }
 
   const indexContent = lines.join("\n")
   const indexPath = `${docsDir}/INDEX.md`

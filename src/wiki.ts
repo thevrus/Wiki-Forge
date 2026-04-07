@@ -149,10 +149,8 @@ export async function generateWiki(
   // Step 2: Create directories
   const entitiesDir = join(docsDir, "entities")
   const conceptsDir = join(docsDir, "concepts")
-  const synthesisDir = join(docsDir, "synthesis")
   mkdirSync(entitiesDir, { recursive: true })
   mkdirSync(conceptsDir, { recursive: true })
-  mkdirSync(synthesisDir, { recursive: true })
 
   // Step 3: Generate pages in parallel
   const tasks = [

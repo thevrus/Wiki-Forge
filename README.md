@@ -111,8 +111,6 @@ docs/
   concepts/               # auto-extracted cross-cutting themes
     authentication-flow.md
     fee-calculation.md
-  synthesis/              # answers from /wf-query, saved back
-    how-fees-work.md
 ```
 
 Each compiled doc includes:
@@ -153,7 +151,7 @@ Each gets its own wiki page. The INDEX.md links everything together.
 
 ### Query with persistence
 
-`/wf-query "how does the booking flow work?"` reads the wiki, synthesizes an answer with citations, and offers to save it as a synthesis page. Knowledge compounds — the next query builds on previous answers.
+`/wf-query "how does the booking flow work?"` reads the wiki and answers with citations back to specific docs.
 
 ### Health checks
 
