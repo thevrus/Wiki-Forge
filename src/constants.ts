@@ -11,8 +11,8 @@ export const LLM_MAX_TOKENS = 65_536
 /** Max bytes per individual source file before truncation. */
 export const SOURCE_FILE_CAP = 30_000
 
-/** Max total bytes of all source files combined per doc. */
-export const SOURCE_TOTAL_CAP = 1_000_000
+/** Max total bytes of all source files combined per doc. ~400KB ≈ 100K tokens, fits 128K context models. */
+export const SOURCE_TOTAL_CAP = 400_000
 
 /** Max bytes for a git diff payload. */
 export const DIFF_CAP = 100_000
