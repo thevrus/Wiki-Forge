@@ -4,7 +4,7 @@
   "description": "Keep your docs in sync with your code. LLM-powered documentation compiler.",
   "type": "module",
   "bin": {
-    "wiki-forge": "./dist/cli.js"
+    "wiki-forge": "dist/cli.js"
   },
   "exports": {
     ".": "./dist/index.js"
