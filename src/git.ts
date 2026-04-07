@@ -86,7 +86,7 @@ export function getDirectoryAuthors(
 
   try {
     // git shortlog -sne gives: "  34\tAlice Chen <alice@co.com>"
-    const pathArgs = paths.join(" ")
+    const pathArgs = paths.map((p) => `"${p}"`).join(" ")
     const output = execSync(
       `git log --all --format="%aN|%aE|%aI" -- ${pathArgs}`,
       { encoding: "utf-8", cwd: repoRoot, maxBuffer: 5 * 1024 * 1024 },
@@ -130,7 +130,7 @@ export function getRecentChanges(
   if (paths.length === 0) return []
 
   try {
-    const pathArgs = paths.join(" ")
+    const pathArgs = paths.map((p) => `"${p}"`).join(" ")
     const output = execSync(
       `git log --since="${days} days ago" --format="%aN|%aI|%s" --name-only -- ${pathArgs}`,
       { encoding: "utf-8", cwd: repoRoot, maxBuffer: 5 * 1024 * 1024 },
@@ -189,7 +189,7 @@ export function getDiffForFiles(
   if (files.length === 0) return ""
 
   try {
-    const filePaths = files.join(" ")
+    const filePaths = files.map((f) => `"${f}"`).join(" ")
     const diff = execSync(`git diff ${since}..HEAD -- ${filePaths}`, {
       encoding: "utf-8",
       cwd: repoRoot,

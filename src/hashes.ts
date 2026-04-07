@@ -64,7 +64,7 @@ function listSourceFiles(patterns: string[], repoRoot: string): string[] {
     const searchDir = pattern.replace(trailingGlob, "")
     try {
       const output = execSync(
-        `find ${searchDir} -type f \\( ${FIND_EXTENSIONS} \\) | sort`,
+        `find "${searchDir}" -type f \\( ${FIND_EXTENSIONS} \\) | sort`,
         { encoding: "utf-8", cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
       ).trim()
       if (output) {
