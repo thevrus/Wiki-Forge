@@ -31,13 +31,11 @@ Documentation rots because maintaining it is manual work that competes with ship
 
 ### 1. Claude Code slash commands (recommended)
 
-Zero install. Just copy the command files.
-
 ```bash
-# Clone and install the slash commands
-git clone https://github.com/thevrus/wiki-forge.git
-cp wiki-forge/commands/*.md ~/.claude/commands/
+npx wiki-forge install-commands
 ```
+
+That's it. No cloning, no config. Now open any project in Claude Code and type `/wf-init`.
 
 Then in any project:
 
