@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
+import { DIFF_CAP } from "./constants"
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -178,8 +179,6 @@ export function getRecentChanges(
     return []
   }
 }
-
-const DIFF_CAP = 50_000
 
 export function getDiffForFiles(
   since: string,

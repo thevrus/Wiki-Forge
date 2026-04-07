@@ -2,6 +2,7 @@ import { execSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { FIND_EXTENSIONS } from "./constants"
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -36,25 +37,6 @@ export function saveHashes(docsDir: string, hashes: FileHashes): void {
 export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16)
 }
-
-const SOURCE_EXTENSIONS = [
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "json",
-  "py",
-  "go",
-  "rs",
-  "rb",
-  "java",
-  "swift",
-  "kt",
-]
-
-const FIND_EXTENSIONS = SOURCE_EXTENSIONS.map((ext) => `-name "*.${ext}"`).join(
-  " -o ",
-)
 
 function listSourceFiles(patterns: string[], repoRoot: string): string[] {
   const allFiles: string[] = []

@@ -1,45 +1,15 @@
 import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import type { DocEntry } from "./config"
+import {
+  EXCLUDED_PATTERNS,
+  FIND_EXTENSIONS,
+  SOURCE_FILE_CAP,
+  SOURCE_TOTAL_CAP,
+} from "./constants"
 import { getDiffForFiles } from "./git"
 
 const TRAILING_GLOB = /[/*]+$/
-
-const SOURCE_CAP = 10_000
-const FULL_SOURCE_CAP = 400_000
-
-const EXCLUDED_PATTERNS = [
-  "node_modules",
-  ".git",
-  "generated",
-  ".d.ts",
-  "__tests__",
-  "__mocks__",
-  ".test.",
-  ".spec.",
-  ".stories.",
-  "fixtures",
-  "bun.lock",
-  "yarn.lock",
-  "package-lock",
-  "pnpm-lock",
-]
-
-// Shared with hashes.ts — all language extensions we support
-const SOURCE_EXTENSIONS = [
-  "ts",
-  "tsx",
-  "js",
-  "jsx",
-  "json",
-  "py",
-  "go",
-  "rs",
-  "rb",
-  "java",
-  "swift",
-  "kt",
-]
 
 // Higher priority = read first (business logic before config/types)
 const PRIORITY_PATTERNS: Array<{ pattern: RegExp; priority: number }> = [
@@ -72,10 +42,6 @@ function filePriority(path: string): number {
   return 40 // default: between config and utils
 }
 
-const FIND_EXTENSIONS = SOURCE_EXTENSIONS.map((ext) => `-name "*.${ext}"`).join(
-  " -o ",
-)
-
 export function fileMatchesSources(
   filePath: string,
   sources: string[],
@@ -90,7 +56,9 @@ export function readSourceFile(filePath: string, repoRoot: string): string {
   try {
     const fullPath = `${repoRoot}/${filePath}`
     const content = readFileSync(fullPath, "utf-8")
-    return content.length > SOURCE_CAP ? content.slice(0, SOURCE_CAP) : content
+    return content.length > SOURCE_FILE_CAP
+      ? content.slice(0, SOURCE_FILE_CAP)
+      : content
   } catch {
     return ""
   }
@@ -179,11 +147,11 @@ export function gatherFullSource(
   let filesRead = 0
 
   for (const file of unique) {
-    if (total >= FULL_SOURCE_CAP) break
+    if (total >= SOURCE_TOTAL_CAP) break
     const content = readSourceFile(file, repoRoot)
     if (!content) continue
     filesRead++
-    if (content.length >= SOURCE_CAP) {
+    if (content.length >= SOURCE_FILE_CAP) {
       truncatedFiles.push(file)
     }
     const chunk = `--- ${file} ---\n${content}`
@@ -193,7 +161,9 @@ export function gatherFullSource(
 
   const result = chunks.join("\n\n")
   const finalContent =
-    result.length > FULL_SOURCE_CAP ? result.slice(0, FULL_SOURCE_CAP) : result
+    result.length > SOURCE_TOTAL_CAP
+      ? result.slice(0, SOURCE_TOTAL_CAP)
+      : result
 
   return {
     content: finalContent,

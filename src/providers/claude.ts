@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { LLM_MAX_TOKENS, LLM_TEMPERATURE } from "../constants"
 import type { LLMProvider, ProviderConfig } from "./types"
 
 export function createClaudeProvider(config: ProviderConfig): {
@@ -11,8 +12,8 @@ export function createClaudeProvider(config: ProviderConfig): {
     async generate(prompt, system) {
       const response = await client.messages.create({
         model,
-        max_tokens: 65536,
-        temperature: 0,
+        max_tokens: LLM_MAX_TOKENS,
+        temperature: LLM_TEMPERATURE,
         ...(system ? { system } : {}),
         messages: [{ role: "user", content: prompt }],
       })

@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai"
+import { LLM_MAX_TOKENS, LLM_TEMPERATURE } from "../constants"
 import type { LLMProvider, ProviderConfig } from "./types"
 
 export function createGeminiProvider(config: ProviderConfig): {
@@ -13,8 +14,8 @@ export function createGeminiProvider(config: ProviderConfig): {
         model,
         contents: prompt,
         config: {
-          temperature: 0,
-          maxOutputTokens: 65536,
+          temperature: LLM_TEMPERATURE,
+          maxOutputTokens: LLM_MAX_TOKENS,
           ...(system ? { systemInstruction: system } : {}),
         },
       })

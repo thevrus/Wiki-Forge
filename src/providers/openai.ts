@@ -1,4 +1,5 @@
 import OpenAI from "openai"
+import { LLM_TEMPERATURE } from "../constants"
 import type { LLMProvider, ProviderConfig } from "./types"
 
 export function createOpenAIProvider(config: ProviderConfig): {
@@ -11,7 +12,7 @@ export function createOpenAIProvider(config: ProviderConfig): {
     async generate(prompt, system) {
       const response = await client.chat.completions.create({
         model,
-        temperature: 0,
+        temperature: LLM_TEMPERATURE,
         messages: [
           ...(system ? [{ role: "system" as const, content: system }] : []),
           { role: "user" as const, content: prompt },
