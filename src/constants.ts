@@ -12,7 +12,7 @@ export const LLM_MAX_TOKENS = 65_536
 export const SOURCE_FILE_CAP = 10_000
 
 /** Max total bytes of all source files combined per doc. */
-export const SOURCE_TOTAL_CAP = 400_000
+export const SOURCE_TOTAL_CAP = 600_000
 
 /** Max bytes for a git diff payload. */
 export const DIFF_CAP = 50_000

@@ -49,52 +49,76 @@ export type OrchestrateResult = {
 const DEFAULT_STYLE = `
 ACCURACY RULES (non-negotiable):
 - ONLY state facts that are directly observable in the provided source code.
-- NEVER guess, infer, or assume functionality that isn't in the code. If you're unsure, say "unclear from source" or omit the claim.
-- NEVER invent feature names, API endpoints, data fields, or behaviors. Every claim must be traceable to specific source code.
-- If the source code is insufficient to describe a section, write "[Insufficient source data]" instead of guessing.
-- Precision over completeness. A short, accurate doc is infinitely better than a long, hallucinated one.
+- NEVER guess, infer, or assume functionality that isn't in the code. If you're unsure, omit the claim or write "[Insufficient source data]".
+- NEVER invent feature names, API endpoints, data fields, or behaviors.
+- Precision over completeness. A short, accurate doc beats a long, hallucinated one.
 
-Write for a mixed audience — engineers, PMs, designers, and new hires should all find value.
+PURPOSE: This document is the BRAIN of the business — not just a tech overview.
+Write for a mixed audience: engineers, PMs, designers, QA, new hires, and CEO.
+Every section should answer: "What would someone new to this company need to know?"
 
-CONTENT BALANCE:
-- Lead with WHAT the system does and WHY — features, user flows, business rules, data relationships, screens, behaviors
-- Include HOW it's built — architecture, key technical decisions, dependencies, infrastructure — but keep it concise
-- Tooling (linters, bundlers, CI) deserves a brief mention for engineer onboarding, not deep coverage
-- Every section should answer: "What would someone new to this project need to know?"
+REQUIRED SECTIONS (include all that apply, in this order):
 
-FRONTMATTER: Every doc MUST start with YAML frontmatter containing these fields:
+## Product Overview
+What the product does. Who it's for. Core value prop. In plain language.
+
+## User Flows & Screens
+Every screen, page, or route the user can reach. What they can do on each.
+Map the user journey from entry to completion for key flows.
+
+## Business Rules & Logic
+This is the MOST IMPORTANT section. Extract every rule from the code:
+- Pricing rules, tier limits, free vs paid boundaries
+- Validation rules (what input is accepted/rejected, and why)
+- Feature flags and what they gate
+- Rate limits, quotas, caps
+- Discount codes, promo logic, coupon rules
+- Time-based rules (expiration, cooldowns, windows)
+- State machine transitions (what can move from state A to state B)
+- Permission checks (who can do what, role-based access)
+Look in: constants files, validation functions, middleware, hooks, config objects, enums, error messages.
+
+## Data Model & Entities
+Key entities, their relationships, and what fields matter. In plain language.
+What does a User/Customer/Pet/Order/Subscription look like?
+
+## Architecture & Tech Stack
+Services, packages, APIs, how they connect. Keep it concise — the business sections above are more important.
+
+## Integrations & External Services
+Third-party services, APIs, webhooks. What data flows in/out.
+
+## Key Decisions & Context
+Reference ticket numbers from git history to explain WHY things were built.
+Link decisions to their business rationale when visible from code or commits.
+
+FRONTMATTER: Every doc MUST start with YAML frontmatter:
 \`\`\`yaml
 ---
 title: "Human-readable page title"
 slug: url-safe-lowercase-slug
 category: compiled
-icon: emoji or lucide icon name that represents the content (e.g. "🏗️" for architecture, "💳" for billing)
-description: "One-sentence summary for SEO and previews"
+icon: emoji
+description: "One-sentence summary"
 sources: ["src/services/", "src/api/"]
 compiled_at: "ISO timestamp"
 ---
 \`\`\`
-- title: concise, descriptive — what a PM would search for
-- slug: lowercase, hyphens, no spaces (e.g. "billing-service", "auth-flow")
-- category: always "compiled" for compiled docs
-- icon: pick one emoji that best represents the doc's main topic
-- description: one sentence, specific enough for a search result snippet
 
-BODY:
+FORMATTING:
 - Open with a 2-3 sentence summary paragraph
 - Use ## for major sections, ### for subsections
-- Be specific: name features, state numbers, describe concrete behavior
-- No raw code snippets. No function signatures. Source tracking lives in frontmatter.
-- Use bullet lists for rules and constraints, tables for comparisons
+- No raw code snippets or function signatures
+- Use bullet lists for rules/constraints, tables for comparisons
 - Each section should be independently readable
 
-DIAGRAMS: Include Mermaid diagrams where they clarify structure or flow:
-- Architecture: use flowchart or graph showing services/components and how they connect
-- Data flows: use sequenceDiagram showing request paths or data pipelines
-- State machines: use stateDiagram-v2 for lifecycle states (e.g. booking, order, user status)
-- Wrap each diagram in a \`\`\`mermaid code fence. Only include diagrams that add clarity — not every section needs one.
+DIAGRAMS: Include Mermaid diagrams where they clarify:
+- Architecture: flowchart showing services/components
+- User flows: sequenceDiagram showing request paths
+- State machines: stateDiagram-v2 for lifecycle states
+Only include diagrams that add clarity.
 
-CITATIONS: When stating a specific fact, behavior, or rule derived from the source code, add a brief inline citation in parentheses referencing the source module or area — e.g. (source: auth module), (source: booking rules), (source: payment service). Do NOT use raw file paths or line numbers. Use plain-language module names that a PM would understand.
+CITATIONS: When stating a specific fact from source code, add (source: module name) in parentheses. Use plain-language names, not file paths.
 `.trim()
 
 // ── Prompts ────────────────────────────────────────────────────────────
@@ -141,20 +165,42 @@ function recompilePrompt(
 function summarizeSourcePrompt(entry: DocEntry, sourceCode: string): string {
   return [
     "You are a code analyst preparing a structured fact sheet for a documentation compiler.",
-    "CRITICAL: ONLY extract facts that are directly visible in the source code. NEVER infer, guess, or assume.",
-    "If something is unclear from the source, mark it as '[unclear from source]' — do NOT fill in the gap with assumptions.",
+    "CRITICAL: ONLY extract facts directly visible in the source code. NEVER infer or guess.",
     "",
-    "Extract and organize (ONLY what is present in the code):",
-    "- Features and capabilities (what can users do?)",
-    "- Business rules, validation, limits, pricing",
-    "- User flows and state transitions",
-    "- Entity relationships and data models (in plain language)",
-    "- External services and integrations",
-    "- Permissions and access control",
-    "- Configuration and defaults",
+    "Extract EVERYTHING under these categories. Be exhaustive — this fact sheet is the brain of the business.",
     "",
-    "Be thorough and specific. Name concrete things. State numbers and defaults.",
-    "Every fact must be traceable to the source code provided. Output as structured bullet points grouped by topic.",
+    "## BUSINESS RULES (most important — dig deep):",
+    "- Every constant, limit, cap, threshold, timeout, fee, discount, price point",
+    "- Every validation rule: what input is accepted/rejected, min/max lengths, required fields",
+    "- Feature flags and what they enable/disable",
+    "- State machine transitions: what states exist, what triggers transitions",
+    "- Permission/role checks: who can do what",
+    "- Time-based rules: expiration, cooldowns, retry windows, scheduling constraints",
+    "- Error handling: what errors are thrown, what messages users see",
+    "Look in: constants files, enums, config objects, validation functions, middleware, hooks",
+    "",
+    "## USER FLOWS:",
+    "- Every screen/page/route and what happens on each",
+    "- Navigation paths: where can the user go from each screen",
+    "- Forms: what fields, what validation, what happens on submit",
+    "- Conditional UI: what shows/hides based on state, role, or feature flag",
+    "",
+    "## DATA MODEL:",
+    "- Key entities and their fields (in plain language)",
+    "- Relationships between entities",
+    "- What gets stored, what's computed, what's ephemeral",
+    "",
+    "## INTEGRATIONS:",
+    "- Third-party services, APIs, SDKs",
+    "- What data flows in/out",
+    "- Webhooks, events, analytics tracking",
+    "",
+    "## ARCHITECTURE:",
+    "- How the code is organized (packages, modules, layers)",
+    "- Key technical decisions visible in the code",
+    "",
+    "Be thorough and specific. Name concrete things. State exact numbers and defaults.",
+    "Every fact must be traceable to the source code. Output as structured bullet points.",
     "",
     `## Document to be written`,
     entry.description,
@@ -647,8 +693,10 @@ function singlePassPrompt(
 ): string {
   const timestamp = new Date().toISOString()
   return [
-    "You are a documentation compiler. Write a complete document from the source code.",
-    "ONLY state facts directly visible in the provided source code. NEVER guess, infer, or assume. If unsure, write '[Insufficient source data]'.",
+    "You are a documentation compiler. Write a COMPLETE knowledge base document from the source code.",
+    "This document is the BRAIN of the business — cover business rules, user flows, data models, AND architecture.",
+    "Dig deep into constants, validation, feature flags, pricing, permissions, state machines, error handling.",
+    "ONLY state facts directly visible in the source code. NEVER guess or assume. If unsure, write '[Insufficient source data]'.",
     "Return ONLY the markdown content — no preamble, no code fences wrapping the output.",
     "",
     style,
