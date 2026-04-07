@@ -1,15 +1,26 @@
-Run health checks on human-written documentation (type: "health-check" in doc-map).
+Run health checks on human-written documentation.
 
-This checks for contradictions between the documentation and the current codebase without rewriting anything.
+## Steps
 
-Run:
-```bash
-wiki-forge health --provider local --repo .
-```
+1. Read `docs/.doc-map.json`. If it doesn't exist, tell the user to run `/wf-init` first.
 
-If wiki-forge is not globally installed:
-```bash
-bunx wiki-forge health --provider local --repo .
-```
+2. For each doc entry with `"type": "health-check"`:
+   a. Read the existing document
+   b. Read the source code from the entry's `sources` directories
+   c. Compare the documentation against the code
 
-After the check, list each issue found with its severity. Suggest specific fixes for each contradiction.
+3. Check for:
+   - **Factual errors**: features described that no longer exist or work differently
+   - **Missing information**: significant new features or rules not documented
+   - **Stale numbers**: limits, fees, defaults, or thresholds that changed in code
+   - **Broken flows**: user flows or state transitions that no longer match
+
+4. For each doc, report:
+   - **✅ {doc_name} — healthy** if no issues found
+   - **⚠ {doc_name}** with a bulleted list of specific issues
+
+5. For each issue found, suggest a concrete fix: what to change in the doc and why.
+
+## Important
+
+This command does NOT rewrite the docs. It only identifies contradictions between human-written documentation and the current codebase. The human decides what to fix.
