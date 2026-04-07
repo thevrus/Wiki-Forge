@@ -505,11 +505,18 @@ export async function orchestrate(
     }
 
     if (forceRecompile) {
-      const cs = log.compileProgress(current, total, `Compiling ${docPath}`)
+      const cs = log.compileProgress(current, total, `Gathering ${docPath}`)
+      const gather = gatherFullSource(entry, repoRoot)
+      if (gather.content === "") {
+        cs.fail(`${docPath} — ${noSourcesMessage(entry)}`)
+        continue
+      }
+      cs.update(`Compiling ${docPath}`, gatherDetail(gather))
       const t0 = Date.now()
       const updated = await runFullRecompile(
         entry,
         currentDoc,
+        gather,
         repoRoot,
         styleGuide,
         singlePass,
@@ -528,6 +535,7 @@ export async function orchestrate(
         })
       } else {
         cs.succeed(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
+        log.gatherWarnings(gather.truncatedFiles)
         if (validation.warnings.length > 0) {
           for (const w of validation.warnings) log.warn(w)
         }
@@ -672,11 +680,10 @@ async function runDiffRecompile(
   return `${injectTicketsFrontmatter(injectContributorsFrontmatter(result.trim(), contributors), tickets)}\n`
 }
 
-function logGatherReport(gather: GatherResult): void {
-  log.gatherReport(
+function gatherDetail(gather: GatherResult): string {
+  return log.gatherSummary(
     gather.fileCount,
     gather.totalSize,
-    gather.truncatedFiles,
     gather.skippedByPriority,
   )
 }
@@ -715,18 +722,13 @@ function singlePassPrompt(
 async function runFullRecompile(
   entry: DocEntry,
   currentDoc: string,
+  gather: GatherResult,
   repoRoot: string,
   style: string,
   singlePass: boolean,
   triageProvider: LLMProvider,
   compileProvider: LLMProvider,
 ): Promise<string> {
-  const gather = gatherFullSource(entry, repoRoot)
-  if (gather.content === "") {
-    throw new Error(noSourcesMessage(entry))
-  }
-  logGatherReport(gather)
-
   const contributors = getDirectoryAuthors(entry.sources, repoRoot)
   const tickets = getTicketsForPaths(entry.sources, repoRoot)
   const authorContext = formatAuthorContext(contributors)
@@ -773,7 +775,6 @@ async function runHealthCheck(
   if (gather.content === "") {
     return [noSourcesMessage(entry)]
   }
-  logGatherReport(gather)
   const prompt = healthCheckPrompt(entry, currentDoc, gather.content)
   const raw = await triageProvider.generate(prompt)
   const { healthy, issues } = parseHealthResponse(raw)

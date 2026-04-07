@@ -162,16 +162,18 @@ export function summary(lines: string[]): void {
 
 // ── Gather report ────────────────────────────────────────────────────
 
-export function gatherReport(
+/** Format gather stats as a short string for embedding in spinner text */
+export function gatherSummary(
   fileCount: number,
   totalSize: number,
-  truncatedFiles: string[],
   skipped: number,
-): void {
+): string {
   const sizeKb = Math.round(totalSize / 1024)
-  info(
-    `${pc.cyan(`${fileCount}`)} files read ${pc.dim(`(${sizeKb}KB)`)}${skipped > 0 ? pc.dim(` · ${skipped} skipped`) : ""}`,
-  )
+  return `${fileCount} files (${sizeKb}KB)${skipped > 0 ? ` · ${skipped} skipped` : ""}`
+}
+
+/** Print gather warnings (truncated files) — call AFTER spinner stops */
+export function gatherWarnings(truncatedFiles: string[]): void {
   if (truncatedFiles.length > 0) {
     warn(
       `${truncatedFiles.length} file(s) truncated: ${pc.dim(truncatedFiles.slice(0, 3).join(", "))}${truncatedFiles.length > 3 ? "..." : ""}`,
