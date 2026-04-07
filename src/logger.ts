@@ -89,6 +89,8 @@ export function compileProgress(
     const parts = currentDetail ? `${currentDetail} · ${timeStr}` : timeStr
     spinner.text = formatProgress(current, total, text, parts) + etaStr
   }, 5000)
+  // Don't block process exit on Ctrl+C
+  if (timer.unref) timer.unref()
 
   return {
     update(newText: string, newDetail?: string) {

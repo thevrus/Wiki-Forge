@@ -398,6 +398,13 @@ function parseHealthResponse(raw: string): {
 export async function orchestrate(
   options: OrchestrateOptions,
 ): Promise<OrchestrateResult> {
+  // Clean exit on Ctrl+C
+  const onSigint = () => {
+    console.log("\n\n  Interrupted. Already-compiled docs are saved.\n")
+    process.exit(130)
+  }
+  process.on("SIGINT", onSigint)
+
   const { repoRoot, docsDir, forceRecompile, mode } = options
 
   const config = resolveConfig(repoRoot, docsDir)
@@ -670,6 +677,7 @@ export async function orchestrate(
     log.success("log.md")
   }
 
+  process.removeListener("SIGINT", onSigint)
   return result
 }
 
