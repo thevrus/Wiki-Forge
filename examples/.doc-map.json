@@ -1,0 +1,34 @@
+{
+  "docs": {
+    "ARCHITECTURE.md": {
+      "description": "System architecture: services, APIs, data flows, and infrastructure",
+      "type": "compiled",
+      "sources": ["src/"],
+      "context_files": ["package.json", "tsconfig.json"]
+    },
+    "PRODUCT.md": {
+      "description": "User-facing screens, flows, features, and UI states",
+      "type": "compiled",
+      "sources": ["src/app/", "src/components/", "src/pages/"],
+      "context_files": []
+    },
+    "DATA.md": {
+      "description": "Data models, entities, relationships, and storage",
+      "type": "compiled",
+      "sources": ["src/types/", "src/models/", "src/db/"],
+      "context_files": []
+    },
+    "BUSINESS_RULES.md": {
+      "description": "Validation rules, business logic, fees, eligibility, and constraints",
+      "type": "compiled",
+      "sources": ["src/lib/", "src/utils/", "src/middleware/"],
+      "context_files": []
+    },
+    "DECISIONS.md": {
+      "description": "Architectural decision records with alternatives and tradeoffs",
+      "type": "health-check",
+      "sources": ["src/"],
+      "context_files": []
+    }
+  }
+}

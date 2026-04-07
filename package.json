@@ -1,0 +1,57 @@
+{
+  "name": "wiki-forge",
+  "version": "0.1.0",
+  "description": "Keep your docs in sync with your code. LLM-powered documentation compiler.",
+  "type": "module",
+  "bin": {
+    "wiki-forge": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "commands",
+    "action.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/cli.ts --outfile dist/cli.js --target node --external react-devtools-core && bun build src/index.ts --outfile dist/index.js --target node && bun build src/action.ts --outfile dist/action.js --target node --external react-devtools-core",
+    "dev": "bun run src/cli.ts",
+    "check": "biome check src/",
+    "format": "biome check --fix src/",
+    "lint": "tsc --noEmit && biome check src/"
+  },
+  "keywords": [
+    "documentation",
+    "llm",
+    "wiki",
+    "github-action",
+    "gemini",
+    "claude",
+    "openai",
+    "code-to-docs",
+    "ai",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thevrus/wiki-forge"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@google/genai": "^1.48.0",
+    "@inkjs/ui": "^2.0.0",
+    "ink": "^6.8.0",
+    "openai": "^6.33.0",
+    "react": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "typescript": "^6.0.2"
+  }
+}

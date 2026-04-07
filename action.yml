@@ -1,0 +1,40 @@
+name: "Wiki Forge — Docs Compiler"
+description: "Keep your docs in sync with your code using LLMs"
+
+branding:
+  icon: "book-open"
+  color: "blue"
+
+inputs:
+  api_key:
+    description: "LLM API key"
+    required: true
+  provider:
+    description: "LLM provider (gemini, claude, or openai)"
+    default: "gemini"
+  docs_dir:
+    description: "Docs output directory relative to repo root (default: docs)"
+    default: "docs"
+  force:
+    description: "Force recompile all docs regardless of drift"
+    default: "false"
+  triage_model:
+    description: "Override the triage model (e.g. gemini-2.5-flash)"
+    required: false
+  compile_model:
+    description: "Override the compile model (e.g. gemini-2.5-pro)"
+    required: false
+
+outputs:
+  docs_changed:
+    description: "Whether any docs were updated"
+  updated_docs:
+    description: "Comma-separated list of updated doc paths"
+  health_issues:
+    description: "Whether any health issues were found"
+  diff_summary:
+    description: "Markdown-formatted diff preview of all doc changes (for PR bodies)"
+
+runs:
+  using: "node22"
+  main: "dist/action.js"
