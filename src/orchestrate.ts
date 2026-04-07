@@ -505,9 +505,7 @@ export async function orchestrate(
     }
 
     if (forceRecompile) {
-      const spinner = log.spin(
-        log.progress(current, total, `Compiling ${docPath}`),
-      )
+      const cs = log.compileProgress(current, total, `Compiling ${docPath}`)
       const t0 = Date.now()
       const updated = await runFullRecompile(
         entry,
@@ -518,21 +516,21 @@ export async function orchestrate(
         providers.triage,
         providers.compile,
       )
-      spinner.stop()
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       const validation = validateCompiledOutput(updated)
-      if (validation.warnings.length > 0) {
-        for (const w of validation.warnings) log.warn(w)
-      }
       if (!validation.valid) {
-        log.error(`${docPath} — rejected (invalid output)`)
+        cs.fail(`${docPath} — rejected`)
+        for (const w of validation.warnings) log.warn(w)
         result.triageResults.push({
           doc: docPath,
           drifted: true,
           reason: `Rejected: ${validation.warnings[0]}`,
         })
       } else {
-        log.success(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
+        cs.succeed(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
+        if (validation.warnings.length > 0) {
+          for (const w of validation.warnings) log.warn(w)
+        }
         writeFileSync(fullDocPath, `${validation.cleaned}\n`)
         result.updatedDocs.push(docPath)
         result.docDiffs.push({
@@ -551,12 +549,11 @@ export async function orchestrate(
       // Diff-only recompile: send previous doc + git diff (not full source)
       const affectedFiles = [...hashDiff.changedFiles, ...hashDiff.addedFiles]
       const nChanged = affectedFiles.length + hashDiff.removedFiles.length
-      const spinner = log.spin(
-        log.progress(
-          current,
-          total,
-          `Compiling ${docPath} (${nChanged} changed)`,
-        ),
+      const cs = log.compileProgress(
+        current,
+        total,
+        `Compiling ${docPath}`,
+        `${nChanged} changed`,
       )
       const t0 = Date.now()
       const updated = await runDiffRecompile(
@@ -568,21 +565,21 @@ export async function orchestrate(
         styleGuide,
         providers.compile,
       )
-      spinner.stop()
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
       const validation = validateCompiledOutput(updated)
-      if (validation.warnings.length > 0) {
-        for (const w of validation.warnings) log.warn(w)
-      }
       if (!validation.valid) {
-        log.error(`${docPath} — rejected (invalid output)`)
+        cs.fail(`${docPath} — rejected`)
+        for (const w of validation.warnings) log.warn(w)
         result.triageResults.push({
           doc: docPath,
           drifted: true,
           reason: `Rejected: ${validation.warnings[0]}`,
         })
       } else {
-        log.success(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
+        cs.succeed(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
+        if (validation.warnings.length > 0) {
+          for (const w of validation.warnings) log.warn(w)
+        }
         writeFileSync(fullDocPath, `${validation.cleaned}\n`)
         result.updatedDocs.push(docPath)
         result.docDiffs.push({
