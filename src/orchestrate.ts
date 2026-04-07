@@ -33,6 +33,7 @@ export type OrchestrateOptions = {
   docsDir?: string
   provider: ProviderConfig
   forceRecompile: boolean
+  skipWiki: boolean
   mode: "check" | "compile" | "health"
 }
 
@@ -563,24 +564,30 @@ export async function orchestrate(
 
   // Post-compilation: wiki pages, index, and log
   if (mode === "compile") {
-    let spinner = log.spin("Extracting entities & concepts")
-    const wikiResult = await generateWiki(
-      config.docsDir,
-      docMap,
-      providers.triage,
-      repoRoot,
-    )
-    spinner.stop()
-    if (wikiResult.entities > 0 || wikiResult.concepts > 0) {
-      log.success(
-        `${wikiResult.entities} entities, ${wikiResult.concepts} concepts`,
-      )
-    }
+    let wikiResult = { entities: 0, concepts: 0 }
 
-    spinner = log.spin("Generating INDEX.md")
-    await generateIndex(config.docsDir, docMap, providers.triage, repoRoot)
-    spinner.stop()
-    log.success("INDEX.md")
+    if (!options.skipWiki) {
+      let spinner = log.spin("Extracting entities & concepts")
+      wikiResult = await generateWiki(
+        config.docsDir,
+        docMap,
+        providers.triage,
+        repoRoot,
+      )
+      spinner.stop()
+      if (wikiResult.entities > 0 || wikiResult.concepts > 0) {
+        log.success(
+          `${wikiResult.entities} entities, ${wikiResult.concepts} concepts`,
+        )
+      }
+
+      spinner = log.spin("Generating INDEX.md")
+      await generateIndex(config.docsDir, docMap, providers.triage, repoRoot)
+      spinner.stop()
+      log.success("INDEX.md")
+    } else {
+      log.skip("Wiki extraction (--skip-wiki)")
+    }
 
     appendCompilationLog(config.docsDir, {
       updatedDocs: result.updatedDocs,

@@ -73,6 +73,7 @@ async function run() {
       docsDir: docsDir ? `${repoRoot}/${docsDir}` : undefined,
       provider,
       forceRecompile: force,
+      skipWiki: false,
       mode: "compile",
     })
 

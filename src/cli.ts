@@ -30,6 +30,7 @@ Flags:
   --repo <path>                       Repository root (default: current directory)
   --docs-dir <path>                   Docs output directory (default: docs/)
   --force                             Force recompile all docs regardless of drift
+  --skip-wiki                         Skip entity/concept extraction (faster compile)
   --interactive, -i                   Interactive setup (for init command)
   --local-cmd <cmd>                   CLI command for local provider (default: "claude -p")
   --ollama-model <model>              Ollama model name (default: llama3.1)
@@ -61,6 +62,7 @@ function parseArgs(argv: string[]): {
   repo: string
   docsDir: string | undefined
   force: boolean
+  skipWiki: boolean
   interactive: boolean
   localCmd: string | undefined
   ollamaModel: string | undefined
@@ -73,6 +75,7 @@ function parseArgs(argv: string[]): {
   let repo = process.cwd()
   let docsDir: string | undefined
   let force = false
+  let skipWiki = false
   let interactive = false
   let localCmd: string | undefined
   let ollamaModel: string | undefined
@@ -115,6 +118,8 @@ function parseArgs(argv: string[]): {
       i++
     } else if (arg === "--force") {
       force = true
+    } else if (arg === "--skip-wiki") {
+      skipWiki = true
     } else if (arg === "--interactive" || arg === "-i") {
       interactive = true
     } else if (arg === "--help" || arg === "-h") {
@@ -135,6 +140,7 @@ function parseArgs(argv: string[]): {
     repo,
     docsDir,
     force,
+    skipWiki,
     interactive,
     localCmd,
     ollamaModel,
@@ -409,6 +415,7 @@ async function main() {
     repo,
     docsDir,
     force,
+    skipWiki,
     interactive,
     localCmd,
     ollamaModel,
@@ -713,6 +720,7 @@ async function main() {
       docsDir: docsDir ? `${repo}/${docsDir}` : undefined,
       provider: providerConfig,
       forceRecompile: force,
+      skipWiki,
       mode,
     })
 
