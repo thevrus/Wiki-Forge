@@ -1,8 +1,7 @@
-import { execSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { FIND_EXTENSIONS } from "./constants"
+import { listFiles } from "./file-glob"
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -38,32 +37,6 @@ export function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16)
 }
 
-function listSourceFiles(patterns: string[], repoRoot: string): string[] {
-  const allFiles: string[] = []
-  const trailingGlob = /[/*]+$/
-
-  for (const pattern of patterns) {
-    const searchDir = pattern.replace(trailingGlob, "")
-    try {
-      const output = execSync(
-        `find "${searchDir}" -type f \\( ${FIND_EXTENSIONS} \\) | sort`,
-        { encoding: "utf-8", cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
-      ).trim()
-      if (output) {
-        const files = output
-          .split("\n")
-          .filter((f) => !f.includes("node_modules") && !f.includes(".git"))
-        allFiles.push(...files)
-      }
-    } catch {
-      // single file pattern
-      allFiles.push(searchDir)
-    }
-  }
-
-  return [...new Set(allFiles)]
-}
-
 // ── Compute current hashes for a doc ─────────────────────────────────
 
 export function computeDocHashes(
@@ -72,7 +45,7 @@ export function computeDocHashes(
   repoRoot: string,
 ): Record<string, string> {
   const patterns = [...sources, ...contextFiles]
-  const files = listSourceFiles(patterns, repoRoot)
+  const files = listFiles(patterns, repoRoot)
   const result: Record<string, string> = {}
 
   for (const file of files) {

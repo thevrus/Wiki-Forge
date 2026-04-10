@@ -78,6 +78,7 @@ export function compileProgress(
     text: formatProgress(current, total, text, detail) + etaStr,
     color: "cyan",
     spinner: "dots",
+    discardStdin: false,
   }).start()
 
   // Update elapsed time every 5 seconds so user knows it's alive
@@ -113,10 +114,107 @@ export function compileProgress(
   }
 }
 
+// ── Shared compile tracker (single spinner for parallel workers) ─────
+
+export type CompileTracker = {
+  /** Register a doc as actively compiling. Returns a handle to update/finish it. */
+  start(docPath: string, detail?: string): CompileHandle
+  /** Tear down the tracker (stops spinner if running). */
+  destroy(): void
+}
+
+export type CompileHandle = {
+  update(text: string, detail?: string): void
+  succeed(msg: string): void
+  fail(msg: string): void
+}
+
+/**
+ * Creates a single shared spinner that tracks multiple parallel compile jobs.
+ * Workers call start() to register, then update/succeed/fail on their handle.
+ * The spinner always shows overall progress + the most recently updated doc.
+ */
+export function createCompileTracker(total: number): CompileTracker {
+  let completed = 0
+  const active = new Map<string, { text: string; detail?: string }>()
+  let spinner: Ora | null = null
+  const startTime = Date.now()
+
+  let timer: ReturnType<typeof setInterval> | null = null
+
+  function refresh() {
+    if (!spinner) return
+    const entries = [...active.values()]
+    // Show the most recently updated active doc
+    const current = entries.length > 0 ? entries[entries.length - 1] : null
+    const label = current?.text ?? "Waiting..."
+    const detail = current?.detail
+    const elapsed = Math.round((Date.now() - startTime) / 1000)
+    const timeStr = formatTime(elapsed)
+    const extra = active.size > 1 ? pc.dim(` (+${active.size - 1} more)`) : ""
+    const detailParts = [detail, timeStr].filter(Boolean).join(" · ")
+    spinner.text = formatProgress(completed, total, label, detailParts) + extra
+  }
+
+  function ensureSpinner() {
+    if (!spinner) {
+      spinner = ora({
+        text: formatProgress(0, total, "Starting..."),
+        color: "cyan",
+        spinner: "dots",
+        discardStdin: false,
+      }).start()
+      timer = setInterval(refresh, 5000)
+      if (timer.unref) timer.unref()
+    }
+  }
+
+  function printLine(symbol: string, color: (s: string) => string, msg: string) {
+    // Pause spinner, print static line, resume
+    if (spinner) spinner.stop()
+    const counter = pc.dim(`[${completed}/${total}]`)
+    console.log(`${color(symbol)} ${counter} ${msg}`)
+    if (active.size > 0 && spinner) {
+      spinner.start()
+      refresh()
+    }
+  }
+
+  return {
+    start(docPath: string, detail?: string): CompileHandle {
+      ensureSpinner()
+      active.set(docPath, { text: docPath, detail })
+      refresh()
+
+      return {
+        update(text: string, newDetail?: string) {
+          active.set(docPath, { text, detail: newDetail })
+          refresh()
+        },
+        succeed(msg: string) {
+          active.delete(docPath)
+          completed++
+          printLine("✔", pc.green, msg)
+        },
+        fail(msg: string) {
+          active.delete(docPath)
+          completed++
+          printLine("✖", pc.red, msg)
+        },
+      }
+    },
+    destroy() {
+      if (timer) clearInterval(timer)
+      if (spinner) spinner.stop()
+      spinner = null
+    },
+  }
+}
+
 // ── Simple spinner (no progress bar) ─────────────────────────────────
 
 export function spin(text: string): Ora {
-  return ora({ text, color: "cyan", spinner: "dots" }).start()
+  return ora({ text, color: "cyan", spinner: "dots", discardStdin: false }).start()
 }
 
 // ── Static progress (for non-spinner use) ────────────────────────────

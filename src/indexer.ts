@@ -147,3 +147,66 @@ function listMdFiles(dir: string): string[] {
     return []
   }
 }
+
+/** Generate llms.txt (https://llmstxt.org/) alongside the wiki. */
+export function generateLlmsTxt(
+  docsDir: string,
+  docMap: DocMap,
+  projectName?: string,
+): string {
+  const entries = Object.entries(docMap.docs).filter(
+    ([, entry]) => entry != null,
+  )
+
+  const title = projectName ?? "Documentation"
+  const lines = [
+    `# ${title}`,
+    "",
+    "> Auto-generated documentation compiled from the codebase by wiki-forge.",
+    "",
+  ]
+
+  const compiled = entries.filter(([, e]) => e!.type === "compiled")
+  const healthChecks = entries.filter(([, e]) => e!.type === "health-check")
+
+  if (compiled.length > 0) {
+    lines.push("## Compiled Documents", "")
+    for (const [docPath, entry] of compiled) {
+      lines.push(`- [${docPath}](${docPath}): ${entry!.description}`)
+    }
+    lines.push("")
+  }
+
+  if (healthChecks.length > 0) {
+    lines.push("## Health-Checked Documents", "")
+    for (const [docPath, entry] of healthChecks) {
+      lines.push(`- [${docPath}](${docPath}): ${entry!.description}`)
+    }
+    lines.push("")
+  }
+
+  const entityFiles = listMdFiles(join(docsDir, "entities"))
+  if (entityFiles.length > 0) {
+    lines.push("## Entities", "")
+    for (const file of entityFiles) {
+      const name = file.replace(/\.md$/, "").replace(/-/g, " ")
+      lines.push(`- [${name}](entities/${file})`)
+    }
+    lines.push("")
+  }
+
+  const conceptFiles = listMdFiles(join(docsDir, "concepts"))
+  if (conceptFiles.length > 0) {
+    lines.push("## Concepts", "")
+    for (const file of conceptFiles) {
+      const name = file.replace(/\.md$/, "").replace(/-/g, " ")
+      lines.push(`- [${name}](concepts/${file})`)
+    }
+    lines.push("")
+  }
+
+  const content = lines.join("\n")
+  const outPath = `${docsDir}/llms.txt`
+  writeFileSync(outPath, content)
+  return outPath
+}

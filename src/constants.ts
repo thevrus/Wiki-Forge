@@ -14,8 +14,25 @@ export const SOURCE_FILE_CAP = 30_000
 /** Max total bytes of all source files combined per doc. ~400KB ≈ 100K tokens, fits 128K context models. */
 export const SOURCE_TOTAL_CAP = 400_000
 
+/** Target max bytes per doc during init. Docs above this produce shallow output. */
+export const SOURCE_BUDGET = 200_000
+
+/** Min total bytes of source to attempt compilation. Below this the LLM just parrots metadata. */
+export const SOURCE_MIN_USEFUL = 1_000
+
 /** Max bytes for a git diff payload. */
 export const DIFF_CAP = 100_000
+
+// ── Compilation Concurrency ──────────────────────────────────────────
+
+/** Max docs compiled in parallel for cloud providers (Claude, Gemini, OpenAI). */
+export const DOC_CONCURRENCY_CLOUD = 3
+
+/** Max docs compiled in parallel for Ollama. */
+export const DOC_CONCURRENCY_OLLAMA = 2
+
+/** Below this total source size (bytes), skip triage and stuff source directly into one LLM call. */
+export const STUFF_THRESHOLD = 50_000
 
 // ── Ollama ───────────────────────────────────────────────────────────
 
@@ -83,7 +100,3 @@ export const SOURCE_EXTENSIONS = [
   "toml",
 ]
 
-/** find command fragment for SOURCE_EXTENSIONS. */
-export const FIND_EXTENSIONS = SOURCE_EXTENSIONS.map(
-  (ext) => `-name "*.${ext}"`,
-).join(" -o ")

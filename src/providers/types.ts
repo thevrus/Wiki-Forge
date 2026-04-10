@@ -1,5 +1,10 @@
+export type GenerateOptions = {
+  /** JSON schema for Ollama structured outputs. Forces model to return valid JSON matching the schema. */
+  format?: Record<string, unknown>
+}
+
 export type LLMProvider = {
-  generate: (prompt: string, system?: string) => Promise<string>
+  generate: (prompt: string, system?: string, options?: GenerateOptions) => Promise<string>
 }
 
 export type ProviderConfig = {

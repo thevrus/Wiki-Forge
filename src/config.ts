@@ -12,6 +12,7 @@ export const DocEntrySchema = z.object({
 export const DocMapSchema = z.object({
   docs: z.record(z.string(), DocEntrySchema),
   style: z.string().optional(),
+  domain: z.string().optional(),
 })
 
 export type DocEntry = z.infer<typeof DocEntrySchema>

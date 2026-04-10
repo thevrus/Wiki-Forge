@@ -1,12 +1,7 @@
-import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import type { DocEntry } from "./config"
-import {
-  EXCLUDED_PATTERNS,
-  FIND_EXTENSIONS,
-  SOURCE_FILE_CAP,
-  SOURCE_TOTAL_CAP,
-} from "./constants"
+import { SOURCE_FILE_CAP, SOURCE_TOTAL_CAP } from "./constants"
+import { listFiles } from "./file-glob"
 import { getDiffForFiles } from "./git"
 
 const TRAILING_GLOB = /[/*]+$/
@@ -65,8 +60,11 @@ export function gatherContext(
   return { diff, contextCode, affectedFiles }
 }
 
+export type SourceFile = { path: string; content: string }
+
 export type GatherResult = {
   content: string
+  files: SourceFile[]
   fileCount: number
   totalSize: number
   truncatedFiles: string[]
@@ -78,32 +76,12 @@ export function gatherFullSource(
   repoRoot: string,
 ): GatherResult {
   const allPatterns = [...entry.sources, ...entry.context_files]
-  const allFiles: string[] = []
-
-  for (const pattern of allPatterns) {
-    const searchDir = pattern.replace(TRAILING_GLOB, "")
-    try {
-      const output = execSync(
-        `find "${searchDir}" -type f \\( ${FIND_EXTENSIONS} \\) | sort`,
-        { encoding: "utf-8", cwd: repoRoot, maxBuffer: 10 * 1024 * 1024 },
-      ).trim()
-      if (output) {
-        const files = output.split("\n").filter((f) => {
-          return !EXCLUDED_PATTERNS.some((ex) => f.includes(ex))
-        })
-        allFiles.push(...files)
-      }
-    } catch {
-      // Directory may not exist — handled by caller
-    }
-  }
-
-  // Deduplicate and sort by priority (high priority first)
-  const unique = [...new Set(allFiles)]
+  const unique = listFiles(allPatterns, repoRoot)
 
   if (unique.length === 0) {
     return {
       content: "",
+      files: [],
       fileCount: 0,
       totalSize: 0,
       truncatedFiles: [],
@@ -113,6 +91,7 @@ export function gatherFullSource(
 
   let total = 0
   const chunks: string[] = []
+  const files: SourceFile[] = []
   const truncatedFiles: string[] = []
   let filesRead = 0
 
@@ -124,6 +103,7 @@ export function gatherFullSource(
     if (content.length >= SOURCE_FILE_CAP) {
       truncatedFiles.push(file)
     }
+    files.push({ path: file, content })
     const chunk = `--- ${file} ---\n${content}`
     chunks.push(chunk)
     total += chunk.length
@@ -137,6 +117,7 @@ export function gatherFullSource(
 
   return {
     content: finalContent,
+    files,
     fileCount: filesRead,
     totalSize: total,
     truncatedFiles,
