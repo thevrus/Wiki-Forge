@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs"
-import { generateDiffPreview } from "./diff"
-import { orchestrate } from "./orchestrate"
+import { orchestrate } from "./compile/orchestrate"
+import { generateDiffPreview } from "./git/diff"
 import type { ProviderConfig } from "./providers/types"
 
 function getInput(name: string): string {

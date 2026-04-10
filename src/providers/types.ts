@@ -4,7 +4,11 @@ export type GenerateOptions = {
 }
 
 export type LLMProvider = {
-  generate: (prompt: string, system?: string, options?: GenerateOptions) => Promise<string>
+  generate: (
+    prompt: string,
+    system?: string,
+    options?: GenerateOptions,
+  ) => Promise<string>
 }
 
 export type ProviderConfig = {

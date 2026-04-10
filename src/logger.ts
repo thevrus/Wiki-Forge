@@ -1,16 +1,13 @@
+import * as clack from "@clack/prompts"
 import ora, { type Ora } from "ora"
 import pc from "picocolors"
 
 // ── Branded header ───────────────────────────────────────────────────
 
 export function header(mode: string, provider: string, repo: string): void {
-  console.log()
-  console.log(
-    `${pc.bold(pc.cyan("wiki-forge"))} ${pc.dim("·")} ${pc.white(mode)}`,
-  )
-  console.log(`${pc.dim("provider")} ${provider}`)
-  console.log(`${pc.dim("repo    ")} ${repo}`)
-  console.log()
+  clack.intro(pc.bgCyan(pc.black(` wiki-forge ${mode} `)))
+  clack.log.info(`${pc.dim("provider")}  ${provider}`)
+  clack.log.info(`${pc.dim("repo    ")}  ${repo}`)
 }
 
 // ── Progress spinner ─────────────────────────────────────────────────
@@ -169,7 +166,11 @@ export function createCompileTracker(total: number): CompileTracker {
     }
   }
 
-  function printLine(symbol: string, color: (s: string) => string, msg: string) {
+  function printLine(
+    symbol: string,
+    color: (s: string) => string,
+    msg: string,
+  ) {
     // Pause spinner, print static line, resume
     if (spinner) spinner.stop()
     const counter = pc.dim(`[${completed}/${total}]`)
@@ -214,7 +215,12 @@ export function createCompileTracker(total: number): CompileTracker {
 // ── Simple spinner (no progress bar) ─────────────────────────────────
 
 export function spin(text: string): Ora {
-  return ora({ text, color: "cyan", spinner: "dots", discardStdin: false }).start()
+  return ora({
+    text,
+    color: "cyan",
+    spinner: "dots",
+    discardStdin: false,
+  }).start()
 }
 
 // ── Static progress (for non-spinner use) ────────────────────────────
@@ -223,48 +229,95 @@ export function progress(current: number, total: number, text: string): string {
   return formatProgress(current, total, text)
 }
 
-// ── Status lines ─────────────────────────────────────────────────────
+// ── Status lines (clack-style) ───────────────────────────────────────
 
 export function success(text: string): void {
-  console.log(`  ${pc.green("✓")} ${text}`)
+  clack.log.success(text)
 }
 
 export function warn(text: string): void {
-  console.log(`  ${pc.yellow("⚠")} ${text}`)
+  clack.log.warn(text)
 }
 
 export function error(text: string): void {
-  console.log(`  ${pc.red("✗")} ${text}`)
+  clack.log.error(text)
 }
 
 export function skip(text: string): void {
-  console.log(`  ${pc.dim("⏭")} ${pc.dim(text)}`)
+  clack.log.info(pc.dim(text))
 }
 
 export function drift(text: string): void {
-  console.log(`  ${pc.magenta("⚡")} ${text}`)
+  clack.log.warn(pc.magenta(text))
 }
 
 export function info(text: string): void {
-  console.log(`  ${pc.dim("·")} ${text}`)
+  clack.log.info(text)
+}
+
+export function message(text: string): void {
+  clack.log.message(text)
 }
 
 // ── Section headers ──────────────────────────────────────────────────
 
 export function section(title: string): void {
-  console.log()
-  console.log(`  ${pc.bold(pc.white(title))}`)
+  clack.log.step(pc.bold(title))
 }
 
 // ── Summary ──────────────────────────────────────────────────────────
 
 export function summary(lines: string[]): void {
-  console.log()
-  console.log(pc.dim("  ─".repeat(20)))
-  for (const line of lines) {
-    console.log(`  ${line}`)
+  clack.note(lines.join("\n"), "Summary")
+}
+
+// ── Command header / footer ──────────────────────────────────────────
+
+export function intro(text: string): void {
+  clack.intro(pc.bgCyan(pc.black(` ${text} `)))
+}
+
+export function outro(text: string): void {
+  clack.outro(text)
+}
+
+// ── Key-value pairs ──────────────────────────────────────────────────
+
+export function keyValue(pairs: Record<string, string>): void {
+  const maxKey = Math.max(...Object.keys(pairs).map((k) => k.length))
+  for (const [key, value] of Object.entries(pairs)) {
+    clack.log.info(`${pc.dim(key.padEnd(maxKey))}  ${value}`)
   }
-  console.log()
+}
+
+// ── List display ─────────────────────────────────────────────────────
+
+export function list(
+  items: Array<{
+    label: string
+    detail?: string
+    status?: "ok" | "warn" | "error" | "dim"
+  }>,
+): void {
+  for (const item of items) {
+    const detail = item.detail ? pc.dim(` — ${item.detail}`) : ""
+    switch (item.status) {
+      case "ok":
+        clack.log.success(`${item.label}${detail}`)
+        break
+      case "warn":
+        clack.log.warn(`${item.label}${detail}`)
+        break
+      case "error":
+        clack.log.error(`${item.label}${detail}`)
+        break
+      case "dim":
+        clack.log.info(pc.dim(`${item.label}${detail}`))
+        break
+      default:
+        clack.log.message(`${item.label}${detail}`)
+    }
+  }
 }
 
 // ── Gather report ────────────────────────────────────────────────────
@@ -277,6 +330,61 @@ export function gatherSummary(
 ): string {
   const sizeKb = Math.round(totalSize / 1024)
   return `${fileCount} files (${sizeKb}KB)${skipped > 0 ? ` · ${skipped} skipped` : ""}`
+}
+
+// ── Table display ───────────────────────────────────────────────────
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape stripping
+const ANSI_RE = /\x1b\[[0-9;]*m/g
+
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "")
+}
+
+export type TableRow = Record<string, string>
+
+export function table(
+  headers: string[],
+  rows: TableRow[],
+  options?: { highlight?: (row: TableRow) => "ok" | "warn" | "dim" | null },
+): void {
+  if (rows.length === 0) return
+
+  // Compute column widths
+  const widths = headers.map((h) => h.length)
+  for (const row of rows) {
+    for (let i = 0; i < headers.length; i++) {
+      const val = row[headers[i]!] ?? ""
+      // Strip ANSI for width calc
+      const plain = stripAnsi(val)
+      widths[i] = Math.max(widths[i]!, plain.length)
+    }
+  }
+
+  // Header
+  const headerLine = headers
+    .map((h, i) => pc.bold(h.padEnd(widths[i]!)))
+    .join("  ")
+  const sep = widths.map((w) => "─".repeat(w)).join("──")
+
+  clack.log.message(headerLine)
+  clack.log.message(pc.dim(sep))
+
+  // Rows
+  for (const row of rows) {
+    const color = options?.highlight?.(row)
+    const cells = headers.map((h, i) => {
+      const val = row[h] ?? ""
+      const plain = stripAnsi(val)
+      const padded = val + " ".repeat(Math.max(0, widths[i]! - plain.length))
+      return padded
+    })
+    let line = cells.join("  ")
+    if (color === "dim") line = pc.dim(line)
+    else if (color === "warn") line = pc.yellow(line)
+    else if (color === "ok") line = pc.green(line)
+    clack.log.message(line)
+  }
 }
 
 /** Print gather warnings (truncated files) — call AFTER spinner stops */

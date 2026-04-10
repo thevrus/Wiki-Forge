@@ -1,5 +1,9 @@
 import http from "node:http"
-import { LLM_MAX_TOKENS, LLM_TEMPERATURE, OLLAMA_TIMEOUT_MINUTES } from "../constants"
+import {
+  LLM_MAX_TOKENS,
+  LLM_TEMPERATURE,
+  OLLAMA_TIMEOUT_MINUTES,
+} from "../constants"
 import type { LLMProvider, ProviderConfig } from "./types"
 
 const DEFAULT_BASE_URL = "http://localhost:11434"
@@ -29,7 +33,10 @@ export function createOllamaProvider(config: ProviderConfig): {
         model,
         stream: true,
         keep_alive: `${OLLAMA_TIMEOUT_MINUTES}m`,
-        options: { temperature: LLM_TEMPERATURE, num_ctx: adaptiveNumCtx(prompt, system) },
+        options: {
+          temperature: LLM_TEMPERATURE,
+          num_ctx: adaptiveNumCtx(prompt, system),
+        },
         ...(options?.format ? { format: options.format } : {}),
         messages: [
           ...(system ? [{ role: "system", content: system }] : []),
@@ -52,9 +59,7 @@ export function createOllamaProvider(config: ProviderConfig): {
               let error = ""
               res.on("data", (chunk: Buffer) => (error += chunk.toString()))
               res.on("end", () =>
-                reject(
-                  new Error(`Ollama error (${res.statusCode}): ${error}`),
-                ),
+                reject(new Error(`Ollama error (${res.statusCode}): ${error}`)),
               )
               return
             }

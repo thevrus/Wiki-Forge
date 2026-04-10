@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>The open-source docs compiler that lives in your repo, runs in your CI, and never phones home.</strong>
+  <strong>Your codebase remembers. Even when your team forgets.</strong>
 </p>
 
 <p align="center">
@@ -16,24 +16,32 @@
   <img src="https://img.shields.io/badge/your%20code%20stays%20yours-blue?style=flat-square" alt="Your code stays yours" />
 </p>
 
-Wiki Forge compiles your source code into a plain-language wiki that PMs, designers, and new engineers can actually understand. When code changes, it detects drift and rewrites only what changed.
+Wiki Forge is a decision provenance engine. It compiles your source code, git history, and PRs into a living knowledge base — not just docs, but the *why* behind every engineering decision. When code changes, it detects drift and rewrites only what changed.
 
-```
-Your code ──→ Wiki Forge ──→ Up-to-date wiki
-  (source)     (compiler)      (docs, entities, concepts, index)
-```
+<p align="center">
+  <img src="assets/architecture.svg" alt="Wiki Forge Architecture — inputs, two-pass compilation, three output layers" width="680" />
+</p>
 
 ---
 
 ## Why
 
-Documentation rots because maintaining it is manual work that competes with shipping features. Wiki Forge treats docs as compiled artifacts — the code is the source of truth, the LLM is the compiler, the docs are the build output.
+Software engineering has 23-25% annual turnover. Each departure costs 4-8 weeks of delivery time — not because the code is lost, but because the *context* behind it is. Why was this module built this way? What incident prompted the retry logic? Who knows how the payment flow actually works?
+
+Wiki Forge treats institutional memory as a compiled artifact. The code + git history is the source of truth, the LLM is the compiler, and three types of output serve three audiences:
+
+| Output | Audience | What it contains |
+|---|---|---|
+| **Wiki pages** | PMs, designers, new engineers | Business rules, architecture, decision context |
+| **AI context files** | Claude Code, Cursor, Copilot | CLAUDE.md, AGENTS.md, llms.txt |
+| **Knowledge risk reports** | Engineering managers | Bus factor per module, onboarding readiness |
 
 | | Manual Docs | RAG / Chatbot | Google Code Wiki | **Wiki Forge** |
 |---|---|---|---|---|
 | Output you own | :white_check_mark: | :x: | :x: | :white_check_mark: |
 | Version-controlled | :white_check_mark: | :x: | :x: | :white_check_mark: |
 | Works offline / air-gapped | :white_check_mark: | :x: | :x: | :white_check_mark: |
+| Decision archaeology | :x: | :x: | :x: | :white_check_mark: |
 | Auto-updates | :x: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
 | Reviewable as a PR | :white_check_mark: | :x: | :x: | :white_check_mark: |
 | Cost | time | per query | freemium | per compile |
@@ -50,7 +58,7 @@ With `--provider local`, Wiki Forge pipes prompts through your local
 
 ---
 
-## Two ways to use it
+## Three ways to use it
 
 ### 1. GitHub Action (for CI/CD)
 
@@ -110,12 +118,37 @@ Then in any project:
 /wf-compile                  # incremental — only recompile drifted docs
 /wf-check                    # preview what drifted (read-only)
 /wf-health                   # check human-written docs for contradictions
-/wf-validate                 # check config for missing sources
-/wf-index                    # regenerate INDEX.md
 /wf-query "how do fees work" # ask questions, save answers as wiki pages
+/wf-brief                    # weekly shipping brief for leadership
 ```
 
 No API key needed — Claude Code is the LLM.
+
+### 3. MCP server (for AI assistants)
+
+Give Claude direct access to your compiled wiki. One server, reads whatever repos it's pointed at:
+
+```bash
+# Local repo (engineer with git checkout)
+claude mcp add wiki-forge -- wiki-forge-mcp --repo ./docs
+
+# Remote repo (PM, no git needed)
+claude mcp add wiki-forge -- wiki-forge-mcp --github acme/platform
+
+# Multi-repo
+claude mcp add wiki-forge -- wiki-forge-mcp --repo /path/to/repo1/docs --repo /path/to/repo2/docs
+```
+
+Claude gets four tools:
+
+| Tool | What it does |
+|---|---|
+| `wiki_forge_why` | "Why is this file this way?" — maps source file to wiki page, returns decision context |
+| `wiki_forge_who` | "Who has context?" — returns ranked contributors with ownership % and bus factor |
+| `wiki_forge_search` | Search the compiled wiki by keyword — returns matching pages with excerpts |
+| `wiki_forge_status` | Brain health dashboard — coverage metrics, knowledge risk, action items |
+
+No LLM calls, no database, no accounts. The MCP server reads markdown files — the compiled wiki is the product, the server is just the read layer. Works across all Claude surfaces: Claude Code, Cowork, Desktop.
 
 ---
 
@@ -124,152 +157,19 @@ No API key needed — Claude Code is the LLM.
 ```
 docs/
   .doc-map.json           # config — maps docs to source directories
-  .last-sync              # git commit hash of last compilation
-  INDEX.md                # master index with summaries of everything
-  log.md                  # compilation changelog
+  INDEX.md                # master index with summaries
+  _status.md              # brain health dashboard
   ARCHITECTURE.md         # compiled docs (user-defined)
-  PRODUCT.md
-  BUSINESS_RULES.md
-  entities/               # auto-extracted from compiled docs
-    booking-service.md
-    payment-gateway.md
+  entities/               # auto-extracted services, APIs, models
   concepts/               # auto-extracted cross-cutting themes
-    authentication-flow.md
-    fee-calculation.md
+  _reports/               # weekly engineering digests
 ```
 
-Each compiled doc includes:
-- **YAML frontmatter** with sources and compilation timestamp
-- **Mermaid diagrams** for architecture, data flows, and state machines
-- **Inline citations** like `(source: auth module)` — plain language, not file paths
-- **No code snippets** — written for PMs, not engineers
+Each compiled doc includes YAML frontmatter, Mermaid diagrams, inline citations, and is written for PMs — not engineers.
 
-## How it works
+**[How it works](./HOW-IT-WORKS.md)** — init interview, two-pass compilation, structured output, queries, health checks
 
-### Init: interview-first setup
-
-`/wf-init` doesn't just scan directories. It asks:
-
-1. *"What does this project do?"* (proposes answer from README)
-2. *"Who's this wiki for, and what do they ask about?"*
-
-Then scans the codebase and suggests docs informed by both your answers and the code structure — including custom docs like `INJECTION.md` that don't fit standard templates.
-
-### Compile: two-pass, cost-optimized
-
-1. **Triage (cheap model)** — "Did this doc drift?" Most pushes stop here.
-2. **Recompile (expensive model)** — Only runs on drifted docs.
-
-With `--force`, it does a deeper two-pass:
-1. **Summarize** — Reads all source, extracts structured facts
-2. **Compile** — Writes the doc from the summary
-
-#### Estimated cost per compile
-
-| Repo size | Triage cost | Full recompile |
-|---|---|---|
-| Small (~10 files) | ~$0.01 | ~$0.10 |
-| Medium (~100 files) | ~$0.05 | ~$0.50 |
-| Large (~500 files) | ~$0.10 | ~$2.00 |
-
-### Structured wiki output
-
-After compilation, Wiki Forge reads all compiled docs and automatically extracts:
-- **Entities** — concrete things (services, APIs, models, UI components)
-- **Concepts** — abstract patterns (auth flow, booking lifecycle, fee rules)
-
-Each gets its own wiki page. The INDEX.md links everything together.
-
-### Query with persistence
-
-`/wf-query "how does the booking flow work?"` reads the wiki and answers with citations back to specific docs.
-
-### Health checks
-
-For human-written docs (ADRs, decision logs), Wiki Forge doesn't rewrite — it checks for contradictions:
-
-```
-Warning: DECISIONS.md:
-  - Decision #3 says "no database" but src/db/ directory now exists
-  - Decision #7 references "XState FSM" but the cart now uses Zustand
-```
-
----
-
-## Configuration
-
-### Doc map
-
-`docs/.doc-map.json` maps documentation to source code:
-
-```json
-{
-  "docs": {
-    "ARCHITECTURE.md": {
-      "description": "System architecture: services, APIs, data flows",
-      "type": "compiled",
-      "sources": ["src/api/", "src/services/"],
-      "context_files": ["package.json"]
-    },
-    "DECISIONS.md": {
-      "description": "Architectural decision records",
-      "type": "health-check",
-      "sources": ["src/"],
-      "context_files": []
-    }
-  },
-  "style": "Write for a technical audience. Include code examples."
-}
-```
-
-| Field | What it does |
-|---|---|
-| `description` | Tells the LLM what the doc covers |
-| `type` | `"compiled"` = LLM writes it. `"health-check"` = human writes it, LLM checks it |
-| `sources` | Directories the LLM reads |
-| `context_files` | Always-included files for broader context |
-| `style` | Optional — override the default writing style |
-
-### LLM providers (CLI / GitHub Action)
-
-| Provider | Triage model | Compile model | Env var |
-|---|---|---|---|
-| `gemini` | gemini-2.5-flash | gemini-2.5-pro | `GEMINI_API_KEY` |
-| `claude` | claude-haiku-4-5 | claude-sonnet-4-6 | `ANTHROPIC_API_KEY` |
-| `openai` | gpt-4.1-mini | gpt-4.1 | `OPENAI_API_KEY` |
-| `local` | claude -p | claude -p | (none needed) |
-
-The `local` provider pipes prompts through the `claude` CLI. Use `--local-cmd` for other tools:
-
-```bash
-wiki-forge compile --provider local --local-cmd "codex -q"
-```
-
----
-
-## CLI Reference
-
-```
-wiki-forge <command> [flags]
-
-Commands:
-  init              Scaffold .doc-map.json (--interactive for guided setup)
-  compile           Compile drifted docs (--force for full recompile)
-  check             Report drift without writing
-  health            Check human-written docs for contradictions
-  index             Regenerate INDEX.md
-  validate          Check config for missing sources
-  install-commands  Install /wf-* slash commands for Claude Code
-
-Flags:
-  --provider <gemini|claude|openai|local>  LLM provider (default: gemini)
-  --api-key <key>             API key (or set env var)
-  --repo <path>               Repository root (default: cwd)
-  --docs-dir <path>           Docs directory (default: docs)
-  --force                     Recompile all docs
-  --interactive, -i           Interactive setup (for init)
-  --local-cmd <cmd>           CLI command for local provider (default: "claude -p")
-```
+**[Configuration & CLI reference](./CONFIGURATION.md)** — doc map schema, LLM providers, all commands and flags
 
 ---
 

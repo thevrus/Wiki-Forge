@@ -99,4 +99,3 @@ export const SOURCE_EXTENSIONS = [
   "yml",
   "toml",
 ]
-

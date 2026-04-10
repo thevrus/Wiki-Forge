@@ -42,10 +42,7 @@ export function listFiles(patterns: string[], cwd: string): string[] {
  * Estimate total source bytes for given directory patterns.
  * Used by init to decide whether to split docs.
  */
-export function estimateSourceSize(
-  patterns: string[],
-  cwd: string,
-): number {
+export function estimateSourceSize(patterns: string[], cwd: string): number {
   const files = listFiles(patterns, cwd)
   let total = 0
   for (const f of files) {

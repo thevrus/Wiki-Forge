@@ -1,569 +1,24 @@
 #!/usr/bin/env node
 
 import { defineCommand, runMain } from "citty"
-import { orchestrate } from "./orchestrate"
+import {
+  docsDirArg,
+  ENV_KEY_MAP,
+  llmArgs,
+  repoArg,
+  resolveApiKey,
+  VERSION,
+} from "./cli/args"
+import { interactiveInit, runInit } from "./cli/init"
+import { interactiveWizard } from "./cli/wizard"
+import { orchestrate } from "./compile/orchestrate"
+import * as log from "./logger"
 import type { ProviderConfig } from "./providers/types"
-
-const VERSION = "0.5.0"
-
-// ── Shared arg definitions ──────────────────────────────────────────
-
-const providerArg = {
-  type: "enum" as const,
-  description: "LLM provider",
-  default: "gemini",
-  options: ["gemini", "claude", "openai", "ollama", "local"],
-}
-
-const repoArg = {
-  type: "string" as const,
-  description: "Repository root",
-  default: process.cwd(),
-}
-
-const docsDirArg = {
-  type: "string" as const,
-  description: "Docs output directory",
-}
-
-const apiKeyArg = {
-  type: "string" as const,
-  description:
-    "API key (or set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY)",
-}
-
-const localCmdArg = {
-  type: "string" as const,
-  description: 'CLI command for local provider (default: "claude -p")',
-}
-
-const ollamaModelArg = {
-  type: "string" as const,
-  description: "Ollama model name (default: llama3.1)",
-}
-
-const ollamaUrlArg = {
-  type: "string" as const,
-  description: "Ollama server URL (default: http://localhost:11434)",
-}
-
-const forceArg = {
-  type: "boolean" as const,
-  description: "Force recompile all docs regardless of drift",
-  default: false,
-}
-
-const skipWikiArg = {
-  type: "boolean" as const,
-  description: "Skip entity/concept extraction (faster compile)",
-  default: false,
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-const ENV_KEY_MAP: Record<string, string> = {
-  gemini: "GEMINI_API_KEY",
-  claude: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-}
-
-function fatal(message: string): never {
-  console.error(`\n⚠  ${message}\n`)
-  process.exit(1)
-}
-
-function resolveApiKey(provider: string, explicit: string | undefined): string {
-  if (explicit) return explicit
-  const envVar = ENV_KEY_MAP[provider]
-  if (!envVar) fatal(`Unknown provider: ${provider}`)
-  const key = process.env[envVar]
-  if (!key)
-    fatal(`No API key. Set --api-key or ${envVar} environment variable.`)
-  return key
-}
-
-function detectSourceDirs(repo: string): string[] {
-  const { existsSync, readdirSync, statSync } =
-    require("node:fs") as typeof import("node:fs")
-
-  const candidates = [
-    "src",
-    "lib",
-    "app",
-    "apps",
-    "packages",
-    "services",
-    "server",
-    "client",
-    "api",
-    "core",
-    "modules",
-    "components",
-    "cmd",
-    "pkg",
-    "internal",
-    "crates",
-    "django",
-    "flask",
-    "main",
-    "domain",
-    "controllers",
-    "models",
-    "mix",
-  ]
-
-  const sourceExts = new Set([
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".py",
-    ".go",
-    ".rs",
-    ".rb",
-    ".java",
-    ".kt",
-    ".scala",
-    ".cs",
-    ".swift",
-    ".php",
-    ".ex",
-    ".dart",
-  ])
-
-  const found: string[] = []
-
-  for (const dir of candidates) {
-    const full = `${repo}/${dir}`
-    if (existsSync(full) && statSync(full).isDirectory()) {
-      found.push(`${dir}/`)
-    }
-  }
-
-  if (found.length === 0) {
-    const entries = readdirSync(repo, { withFileTypes: true })
-    for (const entry of entries) {
-      if (
-        !entry.isDirectory() ||
-        entry.name.startsWith(".") ||
-        entry.name === "node_modules" ||
-        entry.name === "docs" ||
-        entry.name === "brain" ||
-        entry.name === "dist" ||
-        entry.name === "build" ||
-        entry.name === "vendor"
-      )
-        continue
-
-      try {
-        const files = readdirSync(`${repo}/${entry.name}`)
-        const hasSource = files.some((f: string) => {
-          const ext = f.slice(f.lastIndexOf("."))
-          return sourceExts.has(ext)
-        })
-        if (hasSource) found.push(`${entry.name}/`)
-      } catch {
-        // skip unreadable
-      }
-    }
-  }
-
-  return found.length > 0 ? found : ["src/"]
-}
-
-function detectWorkspacePackages(
-  repo: string,
-): Array<{ name: string; path: string }> {
-  const { existsSync, readdirSync, readFileSync, statSync } =
-    require("node:fs") as typeof import("node:fs")
-
-  const workspaceDirs = ["apps", "packages", "services"]
-  const packages: Array<{ name: string; path: string }> = []
-
-  for (const dir of workspaceDirs) {
-    const full = `${repo}/${dir}`
-    if (!existsSync(full) || !statSync(full).isDirectory()) continue
-
-    const entries = readdirSync(full, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue
-      const pkgPath = `${full}/${entry.name}`
-
-      const hasPkgJson = existsSync(`${pkgPath}/package.json`)
-      if (hasPkgJson) {
-        try {
-          const raw = readFileSync(`${pkgPath}/package.json`, "utf-8")
-          const pkg = JSON.parse(raw)
-          packages.push({
-            name: pkg.name ?? entry.name,
-            path: `${dir}/${entry.name}/`,
-          })
-        } catch {
-          packages.push({ name: entry.name, path: `${dir}/${entry.name}/` })
-        }
-      } else {
-        try {
-          const files = readdirSync(pkgPath)
-          const hasSource = files.some(
-            (f: string) =>
-              f.endsWith(".ts") ||
-              f.endsWith(".tsx") ||
-              f.endsWith(".js") ||
-              f.endsWith(".py") ||
-              f.endsWith(".go"),
-          )
-          if (hasSource) {
-            packages.push({ name: entry.name, path: `${dir}/${entry.name}/` })
-          }
-        } catch {
-          // skip
-        }
-      }
-    }
-  }
-
-  return packages
-}
-
-function scanDomainDirs(dir: string): string[] {
-  const { readdirSync } = require("node:fs") as typeof import("node:fs")
-  const dirs: string[] = []
-
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (
-        !entry.isDirectory() ||
-        entry.name.startsWith(".") ||
-        entry.name === "node_modules" ||
-        entry.name === "dist" ||
-        entry.name === "build" ||
-        entry.name === ".expo" ||
-        entry.name === ".next" ||
-        entry.name === "assets" ||
-        entry.name === "docs"
-      )
-        continue
-
-      dirs.push(`${entry.name}/`)
-
-      try {
-        const subEntries = readdirSync(`${dir}/${entry.name}`, {
-          withFileTypes: true,
-        })
-        for (const sub of subEntries) {
-          if (
-            sub.isDirectory() &&
-            !sub.name.startsWith(".") &&
-            sub.name !== "node_modules"
-          ) {
-            dirs.push(`${entry.name}/${sub.name}/`)
-          }
-        }
-      } catch {
-        // skip
-      }
-    }
-  } catch {
-    // skip
-  }
-
-  return dirs
-}
-
-function splitDirIfNeeded(
-  dir: string,
-  repoRoot: string,
-  budget: number,
-): string[] {
-  const { readdirSync } = require("node:fs") as typeof import("node:fs")
-  const { estimateSourceSize } = require("./file-glob") as typeof import("./file-glob")
-  const fullDir = `${repoRoot}/${dir}`
-  try {
-    const entries = readdirSync(fullDir, { withFileTypes: true })
-    const subDirs = entries
-      .filter(
-        (e) =>
-          e.isDirectory() &&
-          !e.name.startsWith(".") &&
-          e.name !== "node_modules",
-      )
-      .map((e) => `${dir}${e.name}/`)
-
-    if (subDirs.length <= 1) return [dir]
-
-    const totalSize = estimateSourceSize(subDirs, repoRoot)
-    if (totalSize === 0) return [dir]
-    // Only split if subdirs actually help
-    return totalSize > budget ? subDirs : [dir]
-  } catch {
-    return [dir]
-  }
-}
-
-// ── Init ──────────────────────────────────────────────────────────────
-
-async function runInit(repo: string, customDocsDir?: string) {
-  const { mkdirSync, writeFileSync, existsSync } = await import("node:fs")
-  const dirName = customDocsDir ?? "docs"
-  const docsDir = `${repo}/${dirName}`
-  const docMapPath = `${docsDir}/.doc-map.json`
-
-  if (existsSync(docMapPath)) {
-    console.log(`⏭  ${dirName}/.doc-map.json already exists, skipping.`)
-    return
-  }
-
-  mkdirSync(docsDir, { recursive: true })
-
-  const contextFiles = existsSync(`${repo}/package.json`)
-    ? ["package.json"]
-    : []
-
-  const workspaces = detectWorkspacePackages(repo)
-
-  const docs: Record<
-    string,
-    {
-      description: string
-      type: string
-      sources: string[]
-      context_files: string[]
-    }
-  > = {}
-
-  const { estimateSourceSize } = await import("./file-glob")
-  const { SOURCE_BUDGET } = await import("./constants")
-
-  // Domain category patterns for splitting large packages
-  const DOMAIN_CATEGORIES: Array<{
-    pattern: RegExp
-    suffix: string
-    description: string
-  }> = [
-    {
-      pattern: /\/(app|pages?|screens?|views?|tabs|navigation|routes?)\//,
-      suffix: "SCREENS",
-      description: "screens, navigation, routes, and user-facing flows",
-    },
-    {
-      pattern: /\/(components?|ui|widgets?|elements?)\//,
-      suffix: "COMPONENTS",
-      description: "reusable UI components, design system elements",
-    },
-    {
-      pattern: /\/(hooks?|services?|api|clients?|graphql|queries|mutations)\//,
-      suffix: "DATA-LAYER",
-      description: "hooks, services, API clients, data fetching, state management",
-    },
-    {
-      pattern: /\/(constants?|config|rules?|validations?|policies|permissions?)\//,
-      suffix: "BUSINESS-RULES",
-      description: "business rules, validation, constants, feature flags, permissions",
-    },
-    {
-      pattern: /\/(store|state|redux|zustand|context|providers?)\//,
-      suffix: "STATE",
-      description: "state management, stores, context providers",
-    },
-    {
-      pattern: /\/(utils?|helpers?|lib|shared|common)\//,
-      suffix: "UTILS",
-      description: "shared utilities, helpers, and common modules",
-    },
-    {
-      pattern: /\/(models?|types?|schemas?|entities|domain)\//,
-      suffix: "MODELS",
-      description: "data models, types, schemas, and domain entities",
-    },
-    {
-      pattern: /\/(notifications?|push|messaging|alerts?)\//,
-      suffix: "NOTIFICATIONS",
-      description: "notifications, push messaging, alerts",
-    },
-  ]
-
-  function splitPackage(
-    pkgName: string,
-    prefix: string,
-    pkgPath: string,
-    subDirs: string[],
-  ) {
-    const totalSize = estimateSourceSize([pkgPath], repo)
-    const upper = prefix.toUpperCase()
-
-    // Small package — single doc
-    if (totalSize <= SOURCE_BUDGET) {
-      docs[`${upper}.md`] = {
-        description: `${pkgName}: complete knowledge base — features, user flows, business rules, data model, integrations`,
-        type: "compiled",
-        sources: [pkgPath],
-        context_files: contextFiles,
-      }
-      return
-    }
-
-    // Large package — split by domain categories
-    const claimed = new Set<string>()
-
-    for (const cat of DOMAIN_CATEGORIES) {
-      const matching = subDirs
-        .filter((d) => cat.pattern.test(`/${d}`))
-        .map((d) => `${pkgPath}${d}`)
-
-      if (matching.length === 0) continue
-
-      const size = estimateSourceSize(matching, repo)
-      if (size === 0) continue
-
-      for (const d of matching) claimed.add(d)
-
-      if (size <= SOURCE_BUDGET) {
-        docs[`${upper}-${cat.suffix}.md`] = {
-          description: `${pkgName} ${cat.description}`,
-          type: "compiled",
-          sources: matching,
-          context_files: contextFiles,
-        }
-      } else {
-        // Category too large — split by individual subdirectory
-        // Drop parent dirs that have children also in the list
-        const leaves = matching.filter(
-          (d) => !matching.some((other) => other !== d && other.startsWith(d)),
-        )
-        // For single-dir categories that are still too big, scan one level deeper
-        const finalDirs =
-          leaves.length === 1
-            ? splitDirIfNeeded(leaves[0]!, repo, SOURCE_BUDGET)
-            : leaves
-        for (const dir of finalDirs) {
-          const dirSize = estimateSourceSize([dir], repo)
-          if (dirSize === 0) continue
-          const dirName = dir
-            .replace(pkgPath, "")
-            .replace(/\//g, "-")
-            .replace(/-$/, "")
-            .toUpperCase()
-          const shortName = dir.replace(pkgPath, "").replace(/\/$/, "")
-          docs[`${upper}-${dirName}.md`] = {
-            description: `${pkgName} ${shortName}: ${cat.description}`,
-            type: "compiled",
-            sources: [dir],
-            context_files: contextFiles,
-          }
-        }
-      }
-    }
-
-    // Unclaimed dirs get an overview doc (or split further if too large)
-    const unclaimed = subDirs
-      .map((d) => `${pkgPath}${d}`)
-      .filter((d) => !claimed.has(d))
-    // Drop parent dirs that have children also in the list
-    const unclaimedLeaves = unclaimed.filter(
-      (d) => !unclaimed.some((other) => other !== d && other.startsWith(d)),
-    )
-
-    if (unclaimedLeaves.length > 0) {
-      const unclaimedSize = estimateSourceSize(unclaimedLeaves, repo)
-      if (unclaimedSize > 0 && unclaimedSize <= SOURCE_BUDGET) {
-        docs[`${upper}.md`] = {
-          description: `${pkgName} overview: architecture, entry points, and modules not covered by other docs`,
-          type: "compiled",
-          sources: unclaimedLeaves,
-          context_files: contextFiles,
-        }
-      } else if (unclaimedSize > SOURCE_BUDGET) {
-        for (const dir of unclaimedLeaves) {
-          const dirSize = estimateSourceSize([dir], repo)
-          if (dirSize === 0) continue
-          const dirName = dir
-            .replace(pkgPath, "")
-            .replace(/\//g, "-")
-            .replace(/-$/, "")
-            .toUpperCase()
-          const shortName = dir.replace(pkgPath, "").replace(/\/$/, "")
-          docs[`${upper}-${dirName}.md`] = {
-            description: `${pkgName} ${shortName}`,
-            type: "compiled",
-            sources: [dir],
-            context_files: contextFiles,
-          }
-        }
-      }
-    }
-  }
-
-  if (workspaces.length > 1) {
-    // Monorepo: top-level architecture + per-package split
-    const rootConfigs = ["package.json", "tsconfig.json", "turbo.json"]
-      .filter((f) => existsSync(`${repo}/${f}`))
-    docs["ARCHITECTURE.md"] = {
-      description:
-        "Monorepo overview: workspace structure, shared dependencies, cross-package data flow, and tech stack",
-      type: "compiled",
-      sources: rootConfigs.length > 0 ? rootConfigs : detectSourceDirs(repo).slice(0, 3),
-      context_files: contextFiles,
-    }
-
-    for (const pkg of workspaces) {
-      const slug = pkg.name.replace(/^@[^/]+\//, "").replace(/[^a-z0-9-]/g, "-")
-      const pkgFull = `${repo}/${pkg.path}`
-      const subDirs = scanDomainDirs(pkgFull)
-      splitPackage(pkg.name, slug, pkg.path, subDirs)
-    }
-
-    // Remove docs with negligible source (<1KB)
-    for (const name of Object.keys(docs)) {
-      const size = estimateSourceSize(docs[name]!.sources, repo)
-      if (size < 1024) delete docs[name]
-    }
-
-    console.log(`📚 Created ${dirName}/.doc-map.json (monorepo detected)`)
-    console.log(`   ${workspaces.length} workspace packages found`)
-    console.log(`   ${Object.keys(docs).length} docs configured:`)
-    for (const name of Object.keys(docs)) {
-      const size = estimateSourceSize(docs[name]!.sources, repo)
-      const sizeKb = Math.round(size / 1024)
-      const flag = size > SOURCE_BUDGET ? " ⚠ large" : ""
-      console.log(`     ${name} (${sizeKb}KB)${flag}`)
-    }
-  } else {
-    // Single project
-    const sources = detectSourceDirs(repo)
-    const totalSize = estimateSourceSize(sources, repo)
-    const subDirs = scanDomainDirs(repo)
-
-    if (totalSize <= SOURCE_BUDGET) {
-      docs["PRODUCT.md"] = {
-        description:
-          "Complete product knowledge base: features, user flows, business rules, data model, integrations, and architecture",
-        type: "compiled",
-        sources,
-        context_files: contextFiles,
-      }
-    } else {
-      splitPackage("Project", "PRODUCT", sources[0] ?? "src/", subDirs)
-    }
-
-    console.log(`📚 Created ${dirName}/.doc-map.json`)
-    console.log(`   Detected sources: ${sources.join(", ")} (${Math.round(totalSize / 1024)}KB)`)
-    console.log(`   ${Object.keys(docs).length} docs configured`)
-  }
-
-  writeFileSync(docMapPath, `${JSON.stringify({ docs }, null, 2)}\n`)
-  console.log("   Edit the doc map, then run: wiki-forge compile")
-}
-
-async function interactiveInit(repo: string, docsDir?: string) {
-  const { runInteractiveInit } = await import("./init-interactive")
-  await runInteractiveInit(repo, docsDir)
-}
 
 // ── Validate ────────────────────────────────────────────────────────
 
 async function runValidate(repo: string, docsDir?: string) {
-  const { validateDocMap } = await import("./validate")
+  const { validateDocMap } = await import("./validation/doc-map")
 
   const issues = validateDocMap(
     repo,
@@ -571,20 +26,24 @@ async function runValidate(repo: string, docsDir?: string) {
   )
 
   if (issues.length === 0) {
-    console.log("\n✅ Doc map is valid.\n")
+    log.intro("wiki-forge validate")
+    log.success("Doc map is valid.")
+    log.outro("")
     return
   }
 
   const errors = issues.filter((i) => i.severity === "error")
   const warnings = issues.filter((i) => i.severity === "warning")
 
-  console.log("\n📋 Validation results:\n")
-  for (const issue of issues) {
-    const icon = issue.severity === "error" ? "✗" : "⚠"
-    console.log(`   ${icon} ${issue.doc}: ${issue.message}`)
-  }
-
-  console.log(`\n   ${errors.length} error(s), ${warnings.length} warning(s)\n`)
+  log.intro("wiki-forge validate")
+  log.list(
+    issues.map((issue) => ({
+      label: `${issue.doc}: ${issue.message}`,
+      status:
+        issue.severity === "error" ? ("error" as const) : ("warn" as const),
+    })),
+  )
+  log.outro(`${errors.length} error(s), ${warnings.length} warning(s)`)
 
   if (errors.length > 0) process.exit(1)
 }
@@ -600,6 +59,9 @@ async function runOrchestrate(
     "docs-dir"?: string
     force: boolean
     "skip-wiki": boolean
+    ingest: boolean
+    "skip-github": boolean
+    "skip-tickets": boolean
     "local-cmd"?: string
     "ollama-model"?: string
     "ollama-url"?: string
@@ -607,7 +69,7 @@ async function runOrchestrate(
 ) {
   const provider = args.provider
   const resolvedKey =
-    provider === "local" || provider === "ollama"
+    mode === "check" || provider === "local" || provider === "ollama"
       ? ""
       : resolveApiKey(provider, args["api-key"])
 
@@ -620,51 +82,86 @@ async function runOrchestrate(
     ollamaUrl: args["ollama-url"],
   }
 
-  const log = await import("./logger")
   const pc = (await import("picocolors")).default
 
-  log.header(mode, provider, args.repo)
-  if (args.force) log.info(pc.yellow("Force recompile: all docs"))
+  if (mode === "check") {
+    log.intro(`wiki-forge check`)
+    log.keyValue({ repo: args.repo })
+  } else {
+    log.header(mode, provider, args.repo)
+    if (args.force) log.info(pc.yellow("Force recompile: all docs"))
+    if (args.ingest) log.info(pc.cyan("Ingestion: git history, PRs, tickets"))
+  }
 
   try {
     const result = await orchestrate({
       repoRoot: args.repo,
-      docsDir: args["docs-dir"] ? `${args.repo}/${args["docs-dir"]}` : undefined,
+      docsDir: args["docs-dir"]
+        ? `${args.repo}/${args["docs-dir"]}`
+        : undefined,
       provider: providerConfig,
       forceRecompile: args.force,
       skipWiki: args["skip-wiki"],
+      ingest: args.ingest,
+      skipGitHub: args["skip-github"],
+      skipTickets: args["skip-tickets"],
+      quiet: mode === "check",
       mode,
     })
 
-    const summaryLines: string[] = []
-
-    if (result.updatedDocs.length > 0) {
-      summaryLines.push(
-        `${pc.green("✓")} ${pc.bold(`${result.updatedDocs.length}`)} doc(s) compiled`,
-      )
-    } else if (mode === "compile") {
-      summaryLines.push(`${pc.green("✓")} All docs up to date`)
-    }
-
-    const drifted = result.triageResults.filter((t) => t.drifted).length
-    if (mode === "check" && drifted > 0) {
-      summaryLines.push(`${pc.magenta("⚡")} ${drifted} doc(s) drifted`)
-    }
-
-    if (result.healthIssues.length > 0) {
-      summaryLines.push(
-        `${pc.yellow("⚠")} ${result.healthIssues.length} health issue(s)`,
-      )
-      for (const h of result.healthIssues) {
-        for (const issue of h.issues) {
-          summaryLines.push(`  ${pc.dim(h.doc)}: ${issue}`)
+    if (mode === "check") {
+      // Render check results as a table
+      const drifted = result.triageResults.filter((t) => t.drifted).length
+      const checkRows: log.TableRow[] = result.triageResults.map((t) => {
+        if (!t.drifted) {
+          return {
+            Document: t.doc,
+            Status: pc.green("✓ up to date"),
+            Changed: "",
+          }
         }
-      }
-    } else if (mode === "health") {
-      summaryLines.push(`${pc.green("✓")} All health checks passed`)
-    }
+        // Extract just the count from "10 file(s) changed: added: ..."
+        const countMatch = t.reason.match(/^(\d+) file/)
+        const count = countMatch ? countMatch[1]! : "?"
+        const detail = t.reason.includes("added:")
+          ? "new files"
+          : t.reason.includes("modified:")
+            ? "modified"
+            : "changed"
+        return {
+          Document: t.doc,
+          Status: pc.yellow(`⚡ ${detail}`),
+          Changed: count,
+        }
+      })
+      log.table(["Document", "Status", "Changed"], checkRows)
+      log.outro(drifted > 0 ? `${drifted} doc(s) drifted` : "all up to date")
+    } else {
+      const summaryLines: string[] = []
 
-    log.summary(summaryLines)
+      if (result.updatedDocs.length > 0) {
+        summaryLines.push(
+          `${pc.green("✓")} ${pc.bold(`${result.updatedDocs.length}`)} doc(s) compiled`,
+        )
+      } else if (mode === "compile") {
+        summaryLines.push(`${pc.green("✓")} All docs up to date`)
+      }
+
+      if (result.healthIssues.length > 0) {
+        summaryLines.push(
+          `${pc.yellow("⚠")} ${result.healthIssues.length} health issue(s)`,
+        )
+        for (const h of result.healthIssues) {
+          for (const issue of h.issues) {
+            summaryLines.push(`  ${pc.dim(h.doc)}: ${issue}`)
+          }
+        }
+      } else if (mode === "health") {
+        summaryLines.push(`${pc.green("✓")} All health checks passed`)
+      }
+
+      log.summary(summaryLines)
+    }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown error occurred"
@@ -675,23 +172,17 @@ async function runOrchestrate(
 
 // ── Subcommands ─────────────────────────────────────────────────────
 
-const llmArgs = {
-  provider: providerArg,
-  "api-key": apiKeyArg,
-  repo: repoArg,
-  "docs-dir": docsDirArg,
-  force: forceArg,
-  "skip-wiki": skipWikiArg,
-  "local-cmd": localCmdArg,
-  "ollama-model": ollamaModelArg,
-  "ollama-url": ollamaUrlArg,
-}
-
 const main = defineCommand({
   meta: {
     name: "wiki-forge",
     version: VERSION,
     description: "Keep your docs in sync with your code using LLMs.",
+  },
+  run: async ({ rawArgs }) => {
+    // Only show wizard when invoked with no subcommand
+    if (rawArgs.length === 0) {
+      await interactiveWizard(main)
+    }
   },
   subCommands: {
     init: defineCommand({
@@ -716,7 +207,9 @@ const main = defineCommand({
     }),
 
     compile: defineCommand({
-      meta: { description: "Full compilation — triage + recompile drifted docs" },
+      meta: {
+        description: "Full compilation — triage + recompile drifted docs",
+      },
       args: llmArgs,
       run: async ({ args }) => {
         await runOrchestrate("compile", args)
@@ -724,7 +217,9 @@ const main = defineCommand({
     }),
 
     check: defineCommand({
-      meta: { description: "Triage only — report which docs drifted (no writes)" },
+      meta: {
+        description: "Triage only — report which docs drifted (no writes)",
+      },
       args: llmArgs,
       run: async ({ args }) => {
         await runOrchestrate("check", args)
@@ -745,7 +240,7 @@ const main = defineCommand({
       run: async ({ args }) => {
         const { resolveConfig, loadDocMap } = await import("./config")
         const { loadHashes, computeDocHashes, diffHashes } = await import(
-          "./hashes"
+          "./compile/hashes"
         )
         const { getLastSyncCommit } = await import("./git")
         const { readdirSync } = await import("node:fs")
@@ -761,9 +256,7 @@ const main = defineCommand({
         try {
           docMap = loadDocMap(config.docMapPath)
         } catch {
-          console.log(
-            "\n✗ No .doc-map.json found. Run 'wiki-forge init' first.\n",
-          )
+          log.error("No .doc-map.json found. Run 'wiki-forge init' first.")
           process.exit(1)
         }
 
@@ -776,13 +269,14 @@ const main = defineCommand({
           ([, e]) => e!.type === "health-check",
         )
 
+        const pc = (await import("picocolors")).default
         let driftCount = 0
-        const lines: string[] = []
+        const rows: log.TableRow[] = []
 
         for (const [docPath, entry] of entries) {
           if (!entry) continue
           if (entry.type === "health-check") {
-            lines.push(`  ⚠ ${docPath.padEnd(24)} — health-check`)
+            rows.push({ Document: docPath, Status: "health-check", Files: "—" })
             continue
           }
           const currentHashes = computeDocHashes(
@@ -792,19 +286,32 @@ const main = defineCommand({
           )
           const previousHashes = allHashes[docPath] ?? {}
           const hashDiff = diffHashes(previousHashes, currentHashes)
+          const fileCount = Object.keys(currentHashes).length
 
           if (Object.keys(previousHashes).length === 0) {
-            lines.push(`  ○ ${docPath.padEnd(24)} — not yet compiled`)
+            rows.push({
+              Document: docPath,
+              Status: pc.dim("not yet compiled"),
+              Files: String(fileCount),
+            })
             driftCount++
           } else if (hashDiff.changed) {
             const n =
               hashDiff.changedFiles.length +
               hashDiff.addedFiles.length +
               hashDiff.removedFiles.length
-            lines.push(`  ⚡ ${docPath.padEnd(24)} — ${n} file(s) changed`)
+            rows.push({
+              Document: docPath,
+              Status: pc.yellow(`${n} changed`),
+              Files: String(fileCount),
+            })
             driftCount++
           } else {
-            lines.push(`  ✓ ${docPath.padEnd(24)} — up to date`)
+            rows.push({
+              Document: docPath,
+              Status: pc.green("✓ up to date"),
+              Files: String(fileCount),
+            })
           }
         }
 
@@ -820,24 +327,22 @@ const main = defineCommand({
         const entityCount = countFiles("entities")
         const conceptCount = countFiles("concepts")
 
-        console.log("\n📊 wiki-forge status")
-        console.log(`   Last sync: ${lastSync.slice(0, 7)}`)
-        console.log(`   Docs dir:  ${config.docsDir}\n`)
-        console.log("   Documents:")
-        for (const l of lines) console.log(`  ${l}`)
-        console.log()
-        if (entityCount > 0 || conceptCount > 0) {
-          console.log(
-            `   Wiki: ${entityCount} entities, ${conceptCount} concepts`,
-          )
-        }
-        console.log(
-          `   Total: ${entries.length} docs (${compiled.length} compiled, ${healthChecks.length} health-check)`,
-        )
+        log.intro("wiki-forge status")
+        log.keyValue({
+          "last sync": lastSync.slice(0, 7),
+          "docs dir": config.docsDir,
+        })
+        log.table(["Document", "Status", "Files"], rows)
+
+        const wikiLine =
+          entityCount > 0 || conceptCount > 0
+            ? `Wiki: ${entityCount} entities, ${conceptCount} concepts\n`
+            : ""
+        const totalLine = `${entries.length} docs (${compiled.length} compiled, ${healthChecks.length} health-check)`
         if (driftCount > 0) {
-          console.log(`   ⚡ ${driftCount} doc(s) drifted\n`)
+          log.outro(`${wikiLine}${totalLine} · ${driftCount} drifted`)
         } else {
-          console.log("   ✅ All up to date\n")
+          log.outro(`${wikiLine}${totalLine} · all up to date`)
         }
       },
     }),
@@ -849,7 +354,7 @@ const main = defineCommand({
       args: { repo: repoArg, "docs-dir": docsDirArg },
       run: async ({ args }) => {
         const { resolveConfig, loadDocMap } = await import("./config")
-        const { generateAuthors } = await import("./authors")
+        const { generateAuthors } = await import("./git/authors")
 
         const config = resolveConfig(
           args.repo,
@@ -857,9 +362,10 @@ const main = defineCommand({
         )
         const docMap = loadDocMap(config.docMapPath)
 
-        console.log("\n👥 Generating AUTHORS.md...\n")
+        log.intro("wiki-forge authors")
         const authorsPath = generateAuthors(config.docsDir, docMap, args.repo)
-        console.log(`✅ ${authorsPath}\n`)
+        log.success(authorsPath)
+        log.outro("")
       },
     }),
 
@@ -877,7 +383,7 @@ const main = defineCommand({
             : resolveApiKey(provider, args["api-key"])
         const { resolveConfig, loadDocMap } = await import("./config")
         const { createProviders } = await import("./providers")
-        const { generateIndex } = await import("./indexer")
+        const { generateIndex } = await import("./compile/indexer")
 
         const config = resolveConfig(
           args.repo,
@@ -893,14 +399,15 @@ const main = defineCommand({
           ollamaUrl: args["ollama-url"],
         })
 
-        console.log("\n📇 Generating INDEX.md...\n")
+        log.intro("wiki-forge index")
         const indexPath = await generateIndex(
           config.docsDir,
           docMap,
           providers.triage,
           args.repo,
         )
-        console.log(`✅ ${indexPath}\n`)
+        log.success(indexPath)
+        log.outro("")
       },
     }),
 
@@ -911,87 +418,117 @@ const main = defineCommand({
       },
       args: { repo: repoArg, "docs-dir": docsDirArg },
       run: async ({ args }) => {
-        await runValidate(
-          args.repo,
-          args["docs-dir"],
-        )
+        await runValidate(args.repo, args["docs-dir"])
       },
     }),
 
-    "brain-init": defineCommand({
-      meta: { description: "Scaffold brain/ business knowledge templates" },
-      args: { repo: repoArg, "docs-dir": docsDirArg },
+    report: defineCommand({
+      meta: {
+        description:
+          "Generate brain health report and/or weekly report (uses LLM when provider given)",
+      },
+      args: {
+        ...llmArgs,
+        weekly: {
+          type: "boolean" as const,
+          description: "Also generate the weekly report",
+          default: false,
+        },
+        days: {
+          type: "string" as const,
+          description: "Number of days to cover in weekly report (default: 7)",
+        },
+      },
       run: async ({ args }) => {
-        const { cpSync, mkdirSync, existsSync, readdirSync, readFileSync } =
-          await import("node:fs")
-        const { join, dirname } = await import("node:path")
-        const { fileURLToPath } = await import("node:url")
+        const { resolveConfig, loadDocMap } = await import("./config")
+        const { createProviders } = await import("./providers")
+        const {
+          analyzeRepository,
+          analyzeWeek,
+          generateStatusReport,
+          generateWeeklyReport,
+        } = await import("./report")
 
         const repo = args.repo
-        const brainDir = `${repo}/brain`
-        if (existsSync(brainDir)) {
-          const existing = readdirSync(brainDir).filter((f: string) =>
-            f.endsWith(".md"),
+        const config = resolveConfig(
+          repo,
+          args["docs-dir"] ? `${repo}/${args["docs-dir"]}` : undefined,
+        )
+
+        let docMap: ReturnType<typeof loadDocMap>
+        try {
+          docMap = loadDocMap(config.docMapPath)
+        } catch {
+          log.error("No .doc-map.json found. Run 'wiki-forge init' first.")
+          process.exit(1)
+        }
+
+        const provider = args.provider
+        let triageProvider:
+          | Awaited<ReturnType<typeof createProviders>>["triage"]
+          | undefined
+        try {
+          const envVar = ENV_KEY_MAP[provider]
+          const apiKey =
+            args["api-key"] ?? (envVar ? process.env[envVar] : undefined)
+
+          if (provider === "ollama") {
+            const providers = createProviders({
+              provider: "ollama",
+              apiKey: "",
+              triageModel: args["ollama-model"],
+              compileModel: args["ollama-model"],
+              ollamaUrl: args["ollama-url"],
+            })
+            triageProvider = providers.triage
+          } else if (provider === "local") {
+            const providers = createProviders({
+              provider: "local",
+              apiKey: "",
+              localCmd: args["local-cmd"],
+            })
+            triageProvider = providers.triage
+          } else if (apiKey) {
+            const providers = createProviders({
+              provider: provider as ProviderConfig["provider"],
+              apiKey,
+              localCmd: args["local-cmd"],
+              triageModel: args["ollama-model"],
+              compileModel: args["ollama-model"],
+              ollamaUrl: args["ollama-url"],
+            })
+            triageProvider = providers.triage
+          }
+        } catch {
+          // Provider creation failed — template fallback
+        }
+
+        const mode = triageProvider ? "LLM" : "template"
+        log.intro("wiki-forge report")
+        log.info(`Mode: ${mode}`)
+
+        let spinner = log.spin("Generating brain health report...")
+        const statusPath = await generateStatusReport(
+          config.docsDir,
+          analyzeRepository(config.docsDir, docMap, repo),
+          triageProvider,
+        )
+        spinner.stop()
+        log.success(statusPath)
+
+        if (args.weekly) {
+          const days = args.days ? Number(args.days) : 7
+          spinner = log.spin("Generating weekly report...")
+          const weeklyPath = await generateWeeklyReport(
+            config.docsDir,
+            analyzeWeek(config.docsDir, docMap, repo, days),
+            triageProvider,
           )
-          if (existing.length > 0) {
-            console.log(
-              `\n⏭  brain/ already exists with ${existing.length} files.\n`,
-            )
-            return
-          }
+          spinner.stop()
+          log.success(weeklyPath)
         }
 
-        mkdirSync(brainDir, { recursive: true })
-        mkdirSync(`${brainDir}/DECISIONS`, { recursive: true })
-
-        const templatesDir = join(
-          dirname(fileURLToPath(import.meta.url)),
-          "..",
-          "brain-templates",
-        )
-        const templates = readdirSync(templatesDir).filter((f: string) =>
-          f.endsWith(".md"),
-        )
-
-        for (const file of templates) {
-          cpSync(join(templatesDir, file), join(brainDir, file))
-        }
-
-        console.log(`\n🧠 Created brain/ with ${templates.length} templates:\n`)
-        for (const file of templates) {
-          console.log(`   brain/${file}`)
-        }
-
-        const docsDir = args["docs-dir"] ?? "docs"
-        const docMapPath = `${repo}/${docsDir}/.doc-map.json`
-        if (existsSync(docMapPath)) {
-          const raw = readFileSync(docMapPath, "utf-8")
-          const docMap = JSON.parse(raw)
-          const brainFiles = templates.map((f: string) => `brain/${f}`)
-          let wired = 0
-          for (const [, entry] of Object.entries(docMap.docs ?? {})) {
-            const e = entry as { context_files?: string[] }
-            if (
-              e.context_files &&
-              !e.context_files.some((f: string) => f.startsWith("brain/"))
-            ) {
-              e.context_files.push(...brainFiles)
-              wired++
-            }
-          }
-          if (wired > 0) {
-            const { writeFileSync } = await import("node:fs")
-            writeFileSync(docMapPath, `${JSON.stringify(docMap, null, 2)}\n`)
-            console.log(
-              `\n   ✓ Wired brain/ into ${wired} doc(s) in .doc-map.json`,
-            )
-          }
-        }
-
-        console.log(
-          "\n   Fill in the brain docs — they feed into every compilation.",
-        )
-        console.log("   ▶ Next: /wf-brain claude\n")
+        log.outro("")
       },
     }),
 
@@ -1023,13 +560,14 @@ const main = defineCommand({
           cpSync(join(srcDir, file), join(targetDir, file))
         }
 
-        console.log(
-          `\n✅ Installed ${files.length} commands to ${targetDir}:\n`,
+        log.intro("wiki-forge install-commands")
+        log.success(`Installed ${files.length} commands to ${targetDir}`)
+        log.list(
+          files.map((file: string) => ({
+            label: `/${file.replace(".md", "")}`,
+          })),
         )
-        for (const file of files) {
-          console.log(`   /${file.replace(".md", "")}`)
-        }
-        console.log()
+        log.outro("")
       },
     }),
   },
