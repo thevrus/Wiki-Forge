@@ -25,6 +25,19 @@ Entry points: \`createBooking()\`, \`cancelBooking()\`, \`getAvailableSlots()\`.
 
 ---
 
+## Architecture
+
+\`\`\`mermaid
+flowchart LR
+    A[Client] -->|select slot| B[booking.ts]
+    B -->|check| C[availability.ts]
+    B -->|create| D[appointments DB]
+    D -->|notify| E[notifications.ts]
+    style B fill:#f0f0ff,stroke:#8250df,stroke-width:2px
+\`\`\`
+
+---
+
 ## Business Rules & Logic
 
 ### Cancellation Policy
@@ -61,16 +74,7 @@ Entry points: \`createBooking()\`, \`cancelBooking()\`, \`getAvailableSlots()\`.
 
 \`confirmBooking()\` re-checks slot availability even though the caller already validated it. This is intentional — a race condition between two concurrent bookings selecting the same slot was discovered during load testing (PR #67). The second check inside the database transaction closes the window. Removing it re-opens the race condition.
 
----
-
-## Context Holders
-
-| Engineer | Context | Last active |
-|----------|:-------:|-------------|
-| Alice Chen | **72%** | 2 days ago |
-| Bob Kim | **18%** | 1 week ago |
-
-> ⚠️ **Bus factor: 1** — Alice holds 72% of context. Recommendation: pair a second engineer on the next booking task.
+**Added:** PR #67 (Feb 2024) **By:** Alice Chen
 
 ---
 
@@ -88,6 +92,34 @@ stateDiagram-v2
     confirmed --> cancelled: cancel before start
     confirmed --> no_show: no arrival after 15 min
 \`\`\`
+
+---
+
+## Context Holders
+
+| Engineer | Context | Last active |
+|----------|:-------:|-------------|
+| Alice Chen | **72%** | 2 days ago |
+| Bob Kim | **18%** | 1 week ago |
+
+> ⚠️ **Bus factor: 1** — Alice holds 72% of context. Recommendation: pair a second engineer on the next booking task.
+
+---
+
+## Dependencies
+
+\`\`\`mermaid
+flowchart TD
+    A[booking.ts] -->|imports| B[availability.ts]
+    A -->|imports| C[appointments DB]
+    A -->|imports| D[notifications.ts]
+    E[External: Google Calendar] -.->|sync| B
+\`\`\`
+
+| Dependency | Why | Risk |
+|-----------|-----|------|
+| \`availability.ts\` | Slot checking | Shared module — changes affect booking |
+| Google Calendar API | Optional calendar sync | External dependency, may fail |
 `.trim()
 
 // ── Style guide ───────────────────────────────────────────────────────
@@ -147,7 +179,6 @@ DEPTH RULES:
 DO NOT restate contributor names, commit counts, or ticket lists as body content — those are already in the YAML frontmatter. The body should contain facts derived from the SOURCE CODE, not from git metadata.
 
 FRONTMATTER: Every doc MUST start with YAML frontmatter:
-\`\`\`yaml
 ---
 title: "Human-readable page title"
 slug: url-safe-lowercase-slug
@@ -155,7 +186,8 @@ category: compiled
 description: "One-sentence summary"
 compiled_at: "ISO timestamp"
 ---
-\`\`\`
+
+CRITICAL: Output exactly ONE frontmatter block at the very start. Do NOT wrap it in \`\`\`yaml code fences. Do NOT output a second frontmatter block anywhere in the document.
 
 FORMATTING:
 - Open with a 2-3 sentence summary paragraph, then list entry points

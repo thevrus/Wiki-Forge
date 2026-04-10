@@ -214,6 +214,54 @@ Uses Express.`
     expect(result.warnings.some((w) => w.includes("substantial"))).toBe(true)
   })
 
+  test("strips duplicate frontmatter in yaml code fence", () => {
+    const duped = `---
+title: "Test Doc"
+slug: test-doc
+category: compiled
+description: "A test doc"
+---
+
+\`\`\`yaml
+---
+title: "Test Doc"
+slug: test-doc
+category: compiled
+description: "A test doc"
+---
+\`\`\`
+
+## Overview
+
+This document has a duplicate frontmatter block inside a yaml code fence which should be stripped.`
+    const result = validateCompiledOutput(duped)
+    expect(result.valid).toBe(true)
+    const fmCount = (result.cleaned.match(/^---$/gm) ?? []).length
+    expect(fmCount).toBe(2) // only the real open + close
+  })
+
+  test("strips bare duplicate frontmatter", () => {
+    const duped = `---
+title: "Test Doc"
+slug: test-doc
+category: compiled
+description: "A test doc"
+---
+---
+title: "Duplicate"
+slug: duplicate
+category: compiled
+description: "Should be removed"
+---
+
+## Overview
+
+This document has two consecutive frontmatter blocks and the second one should be stripped.`
+    const result = validateCompiledOutput(duped)
+    expect(result.valid).toBe(true)
+    expect(result.cleaned).not.toContain("Duplicate")
+  })
+
   test("missing fields are warnings, not rejections, if body is fine", () => {
     const missingSlug = `---
 title: "Test Doc"

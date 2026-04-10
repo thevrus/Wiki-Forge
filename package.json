@@ -1,6 +1,6 @@
 {
   "name": "wiki-forge",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Keep your docs in sync with your code. LLM-powered documentation compiler.",
   "type": "module",
   "bin": {

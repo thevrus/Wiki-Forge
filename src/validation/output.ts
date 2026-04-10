@@ -22,6 +22,46 @@ export function stripCodeFences(doc: string): string {
 }
 
 /**
+ * Strip duplicate frontmatter from the body.
+ * Some LLMs output a real frontmatter block followed by a ```yaml code block
+ * containing a second frontmatter, or two consecutive ---...--- blocks.
+ */
+export function stripDuplicateFrontmatter(doc: string): string {
+  const trimmed = doc.trim()
+  if (!trimmed.startsWith("---")) return trimmed
+
+  // Find the end of the first frontmatter block
+  const firstClose = trimmed.indexOf("---", 3)
+  if (firstClose === -1) return trimmed
+  const afterFirst = trimmed.slice(firstClose + 3)
+
+  // Check if body starts with a second frontmatter (possibly inside a code fence)
+  const bodyStart = afterFirst.replace(/^\s*/, "")
+
+  // Pattern 1: ```yaml\n---\n...\n---\n```
+  const fencedFm = bodyStart.match(
+    /^```(?:yaml|yml)\s*\n---\n[\s\S]*?\n---\s*\n```\s*\n?([\s\S]*)$/,
+  )
+  if (fencedFm) {
+    return `${trimmed.slice(0, firstClose + 3)}\n\n${fencedFm[1]!.trim()}`
+  }
+
+  // Pattern 2: bare second ---\n...\n--- immediately after first frontmatter
+  const bareFm = bodyStart.match(
+    /^---\n[\s\S]*?\n---\s*\n([\s\S]*)$/,
+  )
+  if (bareFm) {
+    // Verify it looks like frontmatter (has key: value lines)
+    const secondBlock = bodyStart.slice(3, bodyStart.indexOf("---", 3))
+    if (/^\s*\w[\w_-]*\s*:/m.test(secondBlock)) {
+      return `${trimmed.slice(0, firstClose + 3)}\n\n${bareFm[1]!.trim()}`
+    }
+  }
+
+  return trimmed
+}
+
+/**
  * Count ## headings in the body that have real content underneath (not just
  * contributor/ticket metadata). Returns [total, rich] counts.
  */
@@ -43,7 +83,7 @@ function countSections(body: string): { total: number; rich: number } {
 
 export function validateCompiledOutput(raw: string): ValidationResult {
   const warnings: string[] = []
-  const doc = stripCodeFences(raw)
+  const doc = stripDuplicateFrontmatter(stripCodeFences(raw))
 
   // ── Hard failures ──────────────────────────────────────────────────
 
