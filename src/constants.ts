@@ -59,6 +59,31 @@ export const EXCLUDED_PATTERNS = [
   "pnpm-lock",
 ]
 
+/** Binary / non-source extensions to skip when scanning all files. */
+export const BINARY_EXTENSIONS = new Set([
+  // Images
+  "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "avif", "tiff", "svg",
+  // Fonts
+  "woff", "woff2", "ttf", "otf", "eot",
+  // Audio/video
+  "mp3", "mp4", "wav", "ogg", "webm", "avi", "mov", "flac", "aac",
+  // Archives
+  "zip", "tar", "gz", "bz2", "xz", "7z", "rar",
+  // Compiled / binary
+  "exe", "dll", "so", "dylib", "o", "a", "class", "pyc", "pyo",
+  "wasm", "map", "min.js", "min.css", "bundle.js", "chunk.js",
+  // Data blobs
+  "bin", "dat", "db", "sqlite", "sqlite3",
+  // Certificates / keys
+  "pem", "crt", "key", "p12", "pfx",
+  // Docs (not source)
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  // Lock files
+  "lock",
+  // Source maps
+  "map",
+])
+
 /** Source file extensions to scan. Shared between sources.ts and hashes.ts. */
 export const SOURCE_EXTENSIONS = [
   // JavaScript/TypeScript
@@ -76,14 +101,17 @@ export const SOURCE_EXTENSIONS = [
   "rs",
   // Ruby
   "rb",
+  "erb",
   // JVM
   "java",
   "kt",
+  "kts",
   "scala",
   "groovy",
   // .NET
   "cs",
   "fs",
+  "razor",
   // Swift
   "swift",
   // PHP
@@ -93,9 +121,44 @@ export const SOURCE_EXTENSIONS = [
   "exs",
   // Dart
   "dart",
-  // Config/data (low priority but needed for business rules)
+  // Frontend frameworks
+  "vue",
+  "svelte",
+  "astro",
+  // Template engines
+  "liquid",
+  "hbs",
+  "njk",
+  "pug",
+  "ejs",
+  "templ",
+  // Styles (business rules live here too)
+  "css",
+  "scss",
+  "less",
+  // Schema / query languages
+  "graphql",
+  "gql",
+  "proto",
+  "sql",
+  // Infrastructure
+  "tf",
+  "hcl",
+  // Systems languages
+  "zig",
+  "nim",
+  "lua",
+  "v",
+  // Blockchain
+  "sol",
+  "move",
+  // Data science
+  "r",
+  "jl",
+  // Config/data
   "json",
   "yaml",
   "yml",
   "toml",
+  "xml",
 ]

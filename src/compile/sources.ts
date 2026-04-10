@@ -3,11 +3,9 @@ import type { DocEntry } from "../config"
 import { SOURCE_FILE_CAP, SOURCE_TOTAL_CAP } from "../constants"
 import { listFiles } from "../file-glob"
 import { getDiffForFiles } from "../git"
+import { allocateBudget, scoreFiles } from "./scorer"
 
 const TRAILING_GLOB = /[/*]+$/
-
-// No priority ranking — all source files are equally important.
-// Doc-map splitting handles focus: each doc has its own focused sources.
 
 export function fileMatchesSources(
   filePath: string,
@@ -89,18 +87,38 @@ export function gatherFullSource(
     }
   }
 
+  // Score files by importance and allocate byte budgets
+  const scores = scoreFiles(unique, repoRoot)
+  const budgets = allocateBudget(scores)
+  const budgetMap = new Map(budgets.map((b) => [b.path, b.maxBytes]))
+
   let total = 0
   const chunks: string[] = []
   const files: SourceFile[] = []
   const truncatedFiles: string[] = []
   let filesRead = 0
+  let skipped = 0
 
-  for (const file of unique) {
-    if (total >= SOURCE_TOTAL_CAP) break
-    const content = readSourceFile(file, repoRoot)
+  // Files are already sorted by importance (highest first)
+  for (const { path: file } of scores) {
+    if (total >= SOURCE_TOTAL_CAP) {
+      skipped++
+      continue
+    }
+
+    const budget = budgetMap.get(file) ?? SOURCE_FILE_CAP
+    let content: string
+    try {
+      const fullPath = `${repoRoot}/${file}`
+      const raw = readFileSync(fullPath, "utf-8")
+      content = raw.length > budget ? raw.slice(0, budget) : raw
+    } catch {
+      continue
+    }
     if (!content) continue
+
     filesRead++
-    if (content.length >= SOURCE_FILE_CAP) {
+    if (content.length >= budget && budget < SOURCE_FILE_CAP) {
       truncatedFiles.push(file)
     }
     files.push({ path: file, content })
@@ -121,6 +139,6 @@ export function gatherFullSource(
     fileCount: filesRead,
     totalSize: total,
     truncatedFiles,
-    skippedByPriority: unique.length - filesRead,
+    skippedByPriority: skipped,
   }
 }

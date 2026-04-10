@@ -1,4 +1,4 @@
-export const VERSION = "0.5.0"
+export const VERSION = "0.6.1"
 
 export const ENV_KEY_MAP: Record<string, string> = {
   gemini: "GEMINI_API_KEY",

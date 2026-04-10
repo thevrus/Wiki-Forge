@@ -2,14 +2,18 @@
 
 import { defineCommand, runMain } from "citty"
 import {
+  apiKeyArg,
   docsDirArg,
   ENV_KEY_MAP,
   llmArgs,
+  localCmdArg,
+  ollamaModelArg,
+  ollamaUrlArg,
   repoArg,
   resolveApiKey,
   VERSION,
 } from "./cli/args"
-import { interactiveInit, runInit } from "./cli/init"
+import { interactiveInit, runInit, runSmartInit } from "./cli/init"
 import { interactiveWizard } from "./cli/wizard"
 import { orchestrate } from "./compile/orchestrate"
 import * as log from "./logger"
@@ -186,10 +190,18 @@ const main = defineCommand({
   },
   subCommands: {
     init: defineCommand({
-      meta: { description: "Scaffold .doc-map.json with an example entry" },
+      meta: { description: "Scaffold .doc-map.json (uses LLM when --provider given)" },
       args: {
         repo: repoArg,
         "docs-dir": docsDirArg,
+        provider: {
+          type: "string" as const,
+          description: "LLM provider for smart init",
+        },
+        "api-key": apiKeyArg,
+        "local-cmd": localCmdArg,
+        "ollama-model": ollamaModelArg,
+        "ollama-url": ollamaUrlArg,
         interactive: {
           type: "boolean" as const,
           alias: "i",
@@ -200,6 +212,20 @@ const main = defineCommand({
       run: async ({ args }) => {
         if (args.interactive) {
           await interactiveInit(args.repo, args["docs-dir"])
+        } else if (args.provider) {
+          const providerName = args.provider as ProviderConfig["provider"]
+          const needsKey = !["local", "ollama"].includes(providerName)
+          const apiKey = needsKey ? resolveApiKey(providerName, args["api-key"]) : ""
+          const { createProviders } = await import("./providers")
+          const providers = createProviders({
+            provider: providerName,
+            apiKey,
+            localCmd: args["local-cmd"],
+            ollamaUrl: args["ollama-url"],
+            triageModel: args["ollama-model"],
+            compileModel: args["ollama-model"],
+          })
+          await runSmartInit(args.repo, providers.triage, args["docs-dir"])
         } else {
           await runInit(args.repo, args["docs-dir"])
         }

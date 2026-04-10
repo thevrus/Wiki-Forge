@@ -5,7 +5,7 @@ import { runCommand } from "citty"
 import * as log from "../logger"
 import { ENV_KEY_MAP, VERSION } from "./args"
 
-const LLM_COMMANDS = new Set(["compile", "health", "index", "report"])
+const LLM_COMMANDS = new Set(["init", "compile", "health", "index", "report"])
 
 type SavedPrefs = {
   provider?: string

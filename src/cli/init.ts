@@ -466,7 +466,9 @@ export async function runInit(repo: string, customDocsDir?: string) {
     // Single project
     const sources = detectSourceDirs(repo)
     const totalSize = estimateSourceSize(sources, repo)
-    const subDirs = scanDomainDirs(repo)
+    const primarySource = sources[0] ?? "src/"
+    // Scan inside the source dir, not the repo root
+    const subDirs = scanDomainDirs(`${repo}/${primarySource}`)
 
     if (totalSize <= SOURCE_BUDGET) {
       docs["PRODUCT.md"] = {
@@ -477,7 +479,7 @@ export async function runInit(repo: string, customDocsDir?: string) {
         context_files: contextFiles,
       }
     } else {
-      splitPackage("Project", "PRODUCT", sources[0] ?? "src/", subDirs)
+      splitPackage("Project", "PRODUCT", primarySource, subDirs)
     }
 
     log.intro("wiki-forge init")
@@ -490,6 +492,298 @@ export async function runInit(repo: string, customDocsDir?: string) {
 
   writeFileSync(docMapPath, `${JSON.stringify({ docs }, null, 2)}\n`)
   log.outro("Edit the doc map, then run: wiki-forge compile")
+}
+
+// ── Smart Init (LLM-powered) ─────────────────────────────────────────
+
+type SmartDocEntry = {
+  description: string
+  type: "compiled" | "health-check"
+  sources: string[]
+  context_files: string[]
+}
+
+export async function runSmartInit(
+  repo: string,
+  provider: import("../providers/types").LLMProvider,
+  customDocsDir?: string,
+) {
+  const { mkdirSync, writeFileSync, readFileSync, existsSync } = await import("node:fs")
+  const dirName = customDocsDir ?? "docs"
+  const docsDir = `${repo}/${dirName}`
+  const docMapPath = `${docsDir}/.doc-map.json`
+
+  if (existsSync(docMapPath)) {
+    const existing = readFileSync(docMapPath, "utf-8").trim()
+    const parsed = JSON.parse(existing)
+    if (parsed.docs && Object.keys(parsed.docs).length > 0) {
+      log.skip(`${dirName}/.doc-map.json already exists with ${Object.keys(parsed.docs).length} docs, skipping.`)
+      return
+    }
+  }
+
+  mkdirSync(docsDir, { recursive: true })
+
+  log.intro("wiki-forge init (smart)")
+  const spinner = log.spin("Indexing project structure...")
+
+  const { estimateAllTextSize } = await import("../file-glob")
+  const { SOURCE_BUDGET } = await import("../constants")
+  const budgetKB = Math.round(SOURCE_BUDGET / 1024)
+
+  // List every text file in the repo — the LLM needs full visibility to group by feature
+  const { listAllTextFiles: listAll } = await import("../file-glob")
+  const allFiles = listAll(["./"], repo)
+
+  // Build dir → direct children mapping
+  const dirFiles = new Map<string, string[]>()
+  for (const f of allFiles) {
+    const lastSlash = f.lastIndexOf("/")
+    const dir = lastSlash >= 0 ? `${f.slice(0, lastSlash)}/` : "./"
+    if (!dirFiles.has(dir)) dirFiles.set(dir, [])
+    dirFiles.get(dir)!.push(f)
+  }
+
+  // Build annotated tree: every file listed under its directory with size totals
+  const dirStats: string[] = []
+  const treeLines: string[] = []
+  const sortedDirs = [...dirFiles.keys()].sort()
+
+  for (const dir of sortedDirs) {
+    const size = estimateAllTextSize([dir], repo)
+    if (size === 0) continue
+    const sizeKB = Math.round(size / 1024)
+    const children = dirFiles.get(dir) ?? []
+    const header = `${dir}  (${children.length} files, ${sizeKB}KB)`
+    dirStats.push(header)
+    treeLines.push(header)
+    for (const f of children) {
+      treeLines.push(`  ${f}`)
+    }
+  }
+
+  // If tree is huge, send full file list without per-dir headers to maximize coverage
+  let treeStr: string
+  if (treeLines.length <= 4000) {
+    treeStr = treeLines.join("\n")
+  } else {
+    // Too many lines for interleaved view — send compact: dir summaries + flat file list
+    const compact = [
+      "## Directory summaries",
+      ...dirStats,
+      "",
+      "## All files",
+      ...allFiles,
+    ]
+    treeStr = compact.slice(0, 6000).join("\n")
+  }
+
+  // Read README and package.json for context
+  let readme = ""
+  for (const name of ["README.md", "readme.md", "README"]) {
+    try {
+      readme = readFileSync(`${repo}/${name}`, "utf-8").slice(0, 3000)
+      break
+    } catch { /* skip */ }
+  }
+
+
+  spinner.text = "Suggesting docs for your codebase..."
+
+  // Detect project config files for context_files suggestion
+  const configCandidates = [
+    "package.json", "Cargo.toml", "go.mod", "pyproject.toml", "setup.py",
+    "Gemfile", "build.gradle", "pom.xml", "mix.exs", "pubspec.yaml",
+    "composer.json", "Package.swift", "CMakeLists.txt", "Makefile",
+  ]
+  const detectedConfigs = configCandidates.filter((f) => existsSync(`${repo}/${f}`))
+  const configHint = detectedConfigs.length > 0
+    ? `context_files should include: ${JSON.stringify(detectedConfigs)}`
+    : "context_files can be empty if no project config file exists"
+
+  const system = `You are a documentation architect. Given a codebase with directory sizes, suggest documentation pages for a wiki-forge doc-map. This works with ANY language or framework.
+
+CRITICAL RULES:
+1. Split by FEATURE DOMAIN, not by code layer. Good: "Cart", "Auth", "Payments", "Scheduling". Bad: "Components", "Utils", "Models", "Handlers".
+2. Each doc's total source size must stay under ${budgetKB}KB. Add up the (KB) numbers from the directory listing. If a feature's directories exceed the budget, split into sub-features.
+3. Group directories that serve the SAME feature into ONE doc. Examples:
+   - Go: cmd/server/, internal/auth/, pkg/auth/ → one AUTH doc
+   - Rust: src/payments/, src/models/payment.rs → one PAYMENTS doc
+   - TS: src/vue/apps/cart/, src/components/cart/, src/hooks/useCart/ → one CART doc
+   - Python: app/billing/, app/models/invoice.py, app/tasks/billing.py → one BILLING doc
+4. Sources must be real directories or files from the tree.
+5. Target 8-20 docs for large projects (>500KB total), 4-8 for small ones.
+6. Descriptions must name actual features, screens, APIs, services, or domains from THIS codebase.
+7. Doc names: UPPER-KEBAB.md (e.g. "CART.md", "AUTH.md", "PAYMENTS.md", "INSURANCE-LISTING.md")
+8. type is always "compiled".
+9. ${configHint}
+10. Always include an ARCHITECTURE.md covering project structure, tech stack, and how pieces connect. Its sources should be config files and top-level entry points only (small).
+
+Return ONLY valid JSON. No markdown fences, no explanation, no comments.
+Format: { "docs": { "NAME.md": { "description": "...", "type": "compiled", "sources": ["dir1/", "dir2/"], "context_files": [...] } } }`
+
+  // Read any detected config file for extra context
+  let configContent = ""
+  for (const f of detectedConfigs.slice(0, 2)) {
+    try {
+      configContent += `## ${f}\n${readFileSync(`${repo}/${f}`, "utf-8").slice(0, 2000)}\n\n`
+    } catch { /* skip */ }
+  }
+
+  const prompt = [
+    "Analyze this codebase and suggest documentation pages.\n",
+    "## Directories with sizes\n```",
+    treeStr,
+    "```\n",
+    readme ? `## README (excerpt)\n${readme}\n` : "",
+    configContent || "",
+    `\nBudget: each doc must stay under ${budgetKB}KB of source. Split large directories by feature.`,
+    "\nReturn the doc-map JSON.",
+  ].filter(Boolean).join("\n")
+
+  try {
+    const raw = await provider.generate(prompt, system)
+    spinner.stop()
+
+    // Parse JSON from response (strip code fences if present)
+    const jsonStr = raw.replace(/^```(?:json)?\s*\n?/m, "").replace(/\n?```\s*$/m, "").trim()
+    const result = JSON.parse(jsonStr) as { docs: Record<string, SmartDocEntry> }
+
+    if (!result.docs || Object.keys(result.docs).length === 0) {
+      log.warn("LLM returned empty doc-map, falling back to pattern-based init")
+      await runInit(repo, customDocsDir)
+      return
+    }
+
+    // ── Step 1: Validate sources exist ─────────────────────────────
+    const validatedDocs: Record<string, SmartDocEntry> = {}
+    for (const [name, entry] of Object.entries(result.docs)) {
+      const validSources = entry.sources.filter((s) => {
+        const full = `${repo}/${s.replace(/\/$/, "")}`
+        return existsSync(full)
+      })
+      if (validSources.length > 0) {
+        validatedDocs[name] = {
+          ...entry,
+          sources: validSources,
+          context_files: (entry.context_files ?? []).filter((f) => existsSync(`${repo}/${f}`)),
+        }
+      }
+    }
+
+    if (Object.keys(validatedDocs).length === 0) {
+      log.warn("No valid source paths found in LLM response, falling back to pattern-based init")
+      await runInit(repo, customDocsDir)
+      return
+    }
+
+    // ── Step 2: Coverage check — find unclaimed source dirs ──────
+    const claimedDirs = new Set<string>()
+    for (const entry of Object.values(validatedDocs)) {
+      for (const s of entry.sources) {
+        claimedDirs.add(s.replace(/\/$/, ""))
+      }
+    }
+
+    // All source directories with actual code
+    const allSourceDirs = dirStats
+      .map((line) => line.split("  ")[0]!.replace(/\/$/, ""))
+      .filter((d) => {
+        const size = estimateAllTextSize([`${d}/`], repo)
+        return size >= 1024 // ignore dirs under 1KB
+      })
+
+    const unclaimed = allSourceDirs.filter((d) => {
+      // A dir is claimed if it or any parent is in claimedDirs
+      return ![...claimedDirs].some(
+        (claimed) => d === claimed || d.startsWith(`${claimed}/`) || claimed.startsWith(`${d}/`),
+      )
+    })
+
+    // Auto-assign unclaimed dirs to an UNCOVERED.md doc
+    if (unclaimed.length > 0) {
+      const unclaimedSize = estimateAllTextSize(
+        unclaimed.map((d) => `${d}/`),
+        repo,
+      )
+      if (unclaimedSize >= 1024) {
+        const unclaimedKB = Math.round(unclaimedSize / 1024)
+        // If small enough, bundle into one doc; otherwise split
+        if (unclaimedSize <= SOURCE_BUDGET) {
+          validatedDocs["UNCOVERED.md"] = {
+            description: `Modules not covered by other docs: ${unclaimed.slice(0, 5).join(", ")}${unclaimed.length > 5 ? ` (+${unclaimed.length - 5} more)` : ""}`,
+            type: "compiled",
+            sources: unclaimed.map((d) => `${d}/`),
+            context_files: detectedConfigs.slice(0, 1),
+          }
+          log.warn(`${unclaimed.length} directories (${unclaimedKB}KB) were not covered by the LLM — added to UNCOVERED.md`)
+        } else {
+          // Split unclaimed into individual docs
+          let addedCount = 0
+          for (const d of unclaimed) {
+            const size = estimateAllTextSize([`${d}/`], repo)
+            if (size < 1024) continue
+            const slug = d.replace(/\//g, "-").replace(/^-|-$/g, "").toUpperCase()
+            validatedDocs[`${slug}.md`] = {
+              description: `${d.split("/").pop() ?? d}: auto-detected uncovered module`,
+              type: "compiled",
+              sources: [`${d}/`],
+              context_files: detectedConfigs.slice(0, 1),
+            }
+            addedCount++
+          }
+          log.warn(`${addedCount} uncovered directories (${unclaimedKB}KB) added as individual docs`)
+        }
+      }
+    }
+
+    // ── Step 3: Size warnings ───────────────────────────────────
+    for (const [name, entry] of Object.entries(validatedDocs)) {
+      const size = estimateAllTextSize(entry.sources, repo)
+      if (size > SOURCE_BUDGET) {
+        const sizeKB = Math.round(size / 1024)
+        log.warn(`${name}: ${sizeKB}KB exceeds ${budgetKB}KB budget — consider splitting`)
+      }
+    }
+
+    // ── Step 4: Write ───────────────────────────────────────────
+    writeFileSync(docMapPath, `${JSON.stringify({ docs: validatedDocs }, null, 2)}\n`)
+    mkdirSync(`${docsDir}/entities`, { recursive: true })
+    mkdirSync(`${docsDir}/concepts`, { recursive: true })
+
+    const totalCoverage = estimateAllTextSize(
+      Object.values(validatedDocs).flatMap((e) => e.sources),
+      repo,
+    )
+    const totalSource = estimateAllTextSize(
+      allSourceDirs.map((d) => `${d}/`),
+      repo,
+    )
+    const coveragePct = totalSource > 0 ? Math.round((totalCoverage / totalSource) * 100) : 100
+
+    log.success(`Created ${dirName}/.doc-map.json`)
+    log.keyValue({
+      docs: `${Object.keys(validatedDocs).length} configured`,
+      coverage: `${coveragePct}% of source indexed`,
+    })
+    log.list(
+      Object.entries(validatedDocs).map(([name, entry]) => {
+        const size = estimateAllTextSize(entry.sources, repo)
+        const sizeKB = Math.round(size / 1024)
+        return {
+          label: name,
+          detail: `${sizeKB}KB — ${entry.description.slice(0, 50)}`,
+          status: (size > SOURCE_BUDGET ? "warn" : "ok") as "warn" | "ok",
+        }
+      }),
+    )
+    log.outro("Edit the doc map, then run: wiki-forge compile")
+  } catch (err) {
+    spinner.stop()
+    log.warn(`LLM init failed: ${err instanceof Error ? err.message : "unknown error"}`)
+    log.warn("Falling back to pattern-based init")
+    await runInit(repo, customDocsDir)
+  }
 }
 
 export async function interactiveInit(repo: string, docsDir?: string) {
