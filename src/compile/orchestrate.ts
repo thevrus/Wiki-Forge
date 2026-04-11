@@ -70,9 +70,14 @@ export type OrchestrateResult = {
 export async function orchestrate(
   options: OrchestrateOptions,
 ): Promise<OrchestrateResult> {
-  // Clean exit on Ctrl+C
+  // Clean exit on Ctrl+C — save progress before exiting
+  let allHashesRef: Record<string, Record<string, string>> = {}
   const onSigint = () => {
-    console.log("\n\n  Interrupted. Already-compiled docs are saved.\n")
+    console.log("\n\n  Interrupted. Saving progress...")
+    try {
+      saveHashes(resolveConfig(repoRoot, docsDir).docsDir, allHashesRef)
+    } catch { /* best effort */ }
+    console.log("  Already-compiled docs are saved.\n")
     process.exit(130)
   }
   process.on("SIGINT", onSigint)
@@ -111,6 +116,7 @@ export async function orchestrate(
 
   // File-level hashing for precise drift detection
   let allHashes = loadHashes(config.docsDir)
+  allHashesRef = allHashes
 
   const result: OrchestrateResult = {
     updatedDocs: [],
