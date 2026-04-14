@@ -539,13 +539,17 @@ export async function runSmartInit(
 
   // List every text file in the repo — the LLM needs full visibility to group by feature
   const { listAllTextFiles: listAll } = await import("../file-glob")
-  const allFiles = listAll(["./"], repo)
+  const allFiles = listAll(["./"], repo).filter((f) => {
+    // Exclude build artifacts, config dirs, and non-source paths
+    return !/^(dist|build|out|target|vendor|\.next|\.expo|\.nuxt|\.venv|venv|\.tox|\.gradle|cmake-build[^/]*|coverage|test-results|playwright-report|node_modules|\.git|\.github|\.vscode|\.claude|assets|public|static|docs|e2e|__tests__|__mocks__|__pycache__)\//i.test(f)
+  })
 
   // Build dir → direct children mapping
   const dirFiles = new Map<string, string[]>()
   for (const f of allFiles) {
     const lastSlash = f.lastIndexOf("/")
     const dir = lastSlash >= 0 ? `${f.slice(0, lastSlash)}/` : "./"
+    if (dir === "./") continue // skip root-level files for dir grouping
     if (!dirFiles.has(dir)) dirFiles.set(dir, [])
     dirFiles.get(dir)!.push(f)
   }
@@ -590,8 +594,15 @@ export async function runSmartInit(
     })
     treeStr = filtered.slice(0, 2000).join("\n")
   } else {
-    // Large project: directory summaries only — no individual files
-    treeStr = dirStats.join("\n")
+    // Large project: top dirs by size only — keeps prompt small for local models
+    const ranked = dirStats
+      .map((s) => {
+        const kbMatch = s.match(/(\d+)KB\)$/)
+        return { line: s, kb: kbMatch ? Number(kbMatch[1]) : 0 }
+      })
+      .sort((a, b) => b.kb - a.kb)
+      .slice(0, 150)
+    treeStr = ranked.map((d) => d.line).join("\n")
   }
 
   // Read README and package.json for context
@@ -605,7 +616,7 @@ export async function runSmartInit(
     }
   }
 
-  spinner.text = "Suggesting docs for your codebase..."
+  // spinner updated below after configContent is built
 
   // Detect project config files for context_files suggestion
   const configCandidates = [
@@ -662,6 +673,10 @@ Format: { "docs": { "NAME.md": { "description": "...", "type": "compiled", "sour
       /* skip */
     }
   }
+
+  const promptChars = treeStr.length + (readme?.length ?? 0) + configContent.length
+  const estimatedTokens = Math.round(promptChars / 3.5)
+  spinner.text = `Suggesting docs for your codebase (~${Math.round(estimatedTokens / 1000)}K tokens)...`
 
   const prompt = [
     "Analyze this codebase and suggest documentation pages.\n",
@@ -721,12 +736,38 @@ Format: { "docs": { "NAME.md": { "description": "...", "type": "compiled", "sour
       }
     }
 
-    // All source directories with actual code
+    // Directories to never document (build artifacts, root, config dirs)
+    // Build artifacts and non-source dirs — language-agnostic
+    const SKIP_DIRS = new Set([
+      ".", "./", "",
+      // Build output
+      "dist", "build", "out", "target", "cmake-build",
+      // Vendor / deps
+      "vendor", "node_modules",
+      // Framework caches
+      ".next", ".expo", ".nuxt", ".gradle",
+      // Python envs
+      ".venv", "venv", ".tox", "__pycache__",
+      // Test output
+      "coverage", "test-results", "playwright-report",
+      // IDE / tooling
+      ".claude", ".github", ".vscode",
+      // Static / non-source
+      "assets", "public", "static", "docs", "e2e",
+      "__tests__", "__mocks__",
+    ])
+
+    // All source directories with actual code (excluding junk)
     const allSourceDirs = dirStats
       .map((line) => line.split("  ")[0]!.replace(/\/$/, ""))
       .filter((d) => {
+        // Skip root, build dirs, and known non-source dirs
+        if (SKIP_DIRS.has(d)) return false
+        if (SKIP_DIRS.has(d.split("/").pop() ?? "")) return false
+        // Skip any dir containing /dist/ or /build/ in its path
+        if (/\/(dist|build|out|target|vendor|\.next|\.expo|\.nuxt|\.gradle|\.venv|venv|\.tox|cmake-build[^/]*|coverage|node_modules|__pycache__)(\/|$)/.test(`/${d}`)) return false
         const size = estimateAllTextSize([`${d}/`], repo)
-        return size >= 1024 // ignore dirs under 1KB
+        return size >= 1024
       })
 
     const unclaimed = allSourceDirs.filter((d) => {

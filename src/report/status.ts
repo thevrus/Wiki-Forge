@@ -52,6 +52,7 @@ function renderTemplate(data: ReportData): string {
     team,
     recentDecisions,
     coverageGaps,
+    orphanedDocs,
     compilationStats,
   } = data
   const decisionCoverage =
@@ -225,6 +226,26 @@ function renderTemplate(data: ReportData): string {
     for (const gap of coverageGaps) {
       lines.push(
         `| \`${gap.file}\` | ${gap.commits} | ${gap.issue} | ${gap.suggestedFix} |`,
+      )
+    }
+    lines.push("")
+  }
+
+  // Orphaned docs — sources deleted from the repo, doc still on disk
+  if (orphanedDocs && orphanedDocs.length > 0) {
+    lines.push("---")
+    lines.push("")
+    lines.push("## \ud83d\udc80 Orphaned docs")
+    lines.push("")
+    lines.push(
+      "These pages document source files that no longer exist in the repo. Either restore the sources, update the doc map, or delete the docs.",
+    )
+    lines.push("")
+    lines.push("| Doc | Declared sources (now missing) |")
+    lines.push("|-----|--------------------------------|")
+    for (const o of orphanedDocs) {
+      lines.push(
+        `| \`${o.docPath}\` | ${o.sources.map((s) => `\`${s}\``).join(", ")} |`,
       )
     }
     lines.push("")

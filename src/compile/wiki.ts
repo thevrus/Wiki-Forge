@@ -1,8 +1,17 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
+import matter from "gray-matter"
 import type { DocMap } from "../config"
 import { getDirectoryAuthors } from "../git"
+import { tryGenerateJSON } from "../providers/json"
 import type { LLMProvider } from "../providers/types"
+import { type Extraction, ExtractionSchema } from "../schemas"
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -11,11 +20,6 @@ type Topic = {
   slug: string
   description: string
   referenced_in: string[]
-}
-
-type ExtractedTopics = {
-  entities: Topic[]
-  concepts: Topic[]
 }
 
 // ── Extraction ────────────────────────────────────────────────────────
@@ -55,20 +59,77 @@ function buildExtractionContext(docsDir: string, docMap: DocMap): string {
   return sections.join("\n\n---\n\n")
 }
 
-function parseExtraction(raw: string): ExtractedTopics {
+// ── Cross-run dedup ───────────────────────────────────────────────────
+// As the wiki matures, each run's extraction will rediscover the same
+// entities. Without dedup, we'd overwrite well-written pages and fragment
+// on near-duplicate names (AuthService vs UserAuthService). The rule:
+// if an incoming topic matches an existing page by slug or by tokenized
+// name similarity, leave the existing page alone.
+
+type ExistingTopic = {
+  slug: string
+  name: string
+  tokens: Set<string>
+}
+
+/** Split a name into lowercase tokens, handling camelCase and separators. */
+function tokenize(name: string): Set<string> {
+  const spaced = name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_\-./]+/g, " ")
+    .toLowerCase()
+  const tokens = spaced.split(/\s+/).filter((t) => t.length > 1)
+  return new Set(tokens)
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  for (const t of a) if (b.has(t)) intersection++
+  const union = a.size + b.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+const DEDUP_SIMILARITY_THRESHOLD = 0.6
+
+/** Load existing topic pages from disk so we know what's already documented. */
+function loadExistingTopics(dir: string): ExistingTopic[] {
+  let entries: string[]
   try {
-    const cleaned = raw
-      .replace(/```json?\s*/g, "")
-      .replace(/```/g, "")
-      .trim()
-    const parsed = JSON.parse(cleaned)
-    return {
-      entities: Array.isArray(parsed.entities) ? parsed.entities : [],
-      concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
-    }
+    entries = readdirSync(dir)
   } catch {
-    return { entities: [], concepts: [] }
+    return []
   }
+  const out: ExistingTopic[] = []
+  for (const file of entries) {
+    if (!file.endsWith(".md")) continue
+    const slug = file.replace(/\.md$/, "")
+    let name = slug
+    try {
+      const raw = readFileSync(join(dir, file), "utf-8")
+      const parsed = matter(raw)
+      const fm = parsed.data as { title?: string; slug?: string }
+      if (typeof fm.title === "string" && fm.title.trim()) {
+        name = fm.title.trim().replace(/^["']|["']$/g, "")
+      }
+    } catch {
+      // fall through — use slug as name
+    }
+    out.push({ slug, name, tokens: tokenize(name) })
+  }
+  return out
+}
+
+/** True if an incoming topic duplicates an existing page. */
+function isDuplicate(topic: Topic, existing: ExistingTopic[]): boolean {
+  const incomingTokens = tokenize(topic.name)
+  for (const e of existing) {
+    if (e.slug === topic.slug) return true
+    if (jaccard(incomingTokens, e.tokens) >= DEDUP_SIMILARITY_THRESHOLD) {
+      return true
+    }
+  }
+  return false
 }
 
 // ── Page generation ───────────────────────────────────────────────────
@@ -149,10 +210,29 @@ export async function generateWiki(
   const fullContext = buildExtractionContext(docsDir, docMap)
   if (!fullContext.trim()) return { entities: 0, concepts: 0 }
 
-  // Step 1: Extract entities + concepts
+  // Step 1: Extract entities + concepts via structured output
   const extractionPrompt = `${EXTRACT_PROMPT}\n\n${fullContext}`
-  const raw = await triageProvider.generate(extractionPrompt)
-  const { entities, concepts } = parseExtraction(raw)
+  const extracted: Extraction = (await tryGenerateJSON(
+    triageProvider,
+    ExtractionSchema,
+    extractionPrompt,
+  )) ?? { entities: [], concepts: [] }
+
+  if (extracted.entities.length === 0 && extracted.concepts.length === 0) {
+    return { entities: 0, concepts: 0 }
+  }
+
+  // Cross-run dedup: drop incoming topics that match an existing page on disk.
+  // Preserves hand-tuned or previously compiled pages and prevents near-name
+  // fragmentation (e.g. AuthService vs UserAuthService on a second run).
+  const existingEntities = loadExistingTopics(join(docsDir, "entities"))
+  const existingConcepts = loadExistingTopics(join(docsDir, "concepts"))
+  const entities = extracted.entities.filter(
+    (t) => !isDuplicate(t, existingEntities),
+  )
+  const concepts = extracted.concepts.filter(
+    (t) => !isDuplicate(t, existingConcepts),
+  )
 
   if (entities.length === 0 && concepts.length === 0) {
     return { entities: 0, concepts: 0 }

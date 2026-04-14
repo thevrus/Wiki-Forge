@@ -26,10 +26,7 @@ export type FileScore = {
  *   - Recent changes    (0.15) — actively maintained = relevant
  *   - File size         (0.15) — larger files hold more logic
  */
-export function scoreFiles(
-  filePaths: string[],
-  repoRoot: string,
-): FileScore[] {
+export function scoreFiles(filePaths: string[], repoRoot: string): FileScore[] {
   if (filePaths.length === 0) return []
 
   // Single git log call for all files — parse commits, authors, tickets per file
@@ -158,7 +155,11 @@ export function allocateBudget(
   if (totalScore === 0) {
     // Equal distribution
     const perFile = Math.floor(totalBudget / scores.length)
-    return scores.map((s) => ({ path: s.path, score: s.score, maxBytes: perFile }))
+    return scores.map((s) => ({
+      path: s.path,
+      score: s.score,
+      maxBytes: perFile,
+    }))
   }
 
   // First pass: proportional allocation with floor

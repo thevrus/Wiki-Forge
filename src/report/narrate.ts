@@ -75,6 +75,14 @@ Table: | Source | Commits | Issue | Suggested fix |
 
 ---
 
+## \ud83d\udc80 Orphaned docs
+
+(Include this section ONLY if ORPHANED DOCS in the input has entries. These are wiki pages whose source files were deleted from the repo — the docs remain but their subject is gone.)
+
+Table: | Doc | Declared sources (now missing) |
+
+---
+
 ## \ud83d\udca1 Analysis
 
 2-3 sentences: what's healthy, what's concerning, what needs immediate attention. Be direct.
@@ -146,6 +154,9 @@ function serializeReportData(data: ReportData): string {
     "",
     `COVERAGE GAPS (${data.coverageGaps.length}):`,
     JSON.stringify(data.coverageGaps, null, 2),
+    "",
+    `ORPHANED DOCS (${data.orphanedDocs?.length ?? 0}): docs whose declared sources no longer exist on disk`,
+    JSON.stringify(data.orphanedDocs ?? [], null, 2),
     "",
     data.compilationStats
       ? `COMPILATION STATS: ${JSON.stringify(data.compilationStats)}`

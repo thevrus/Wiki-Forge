@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import type { DocEntry } from "../config"
 import type { Contributor, TicketReference } from "../git"
 import { docPathToTitle } from "../utils"
+import { STYLE_VERSION } from "./prompts"
 
 // ── Author context ────────────────────────────────────────────────────
 
@@ -154,6 +155,7 @@ export function backfillFrontmatter(
 
   // Always update compile metadata
   set("compiled_at", `"${new Date().toISOString()}"`)
+  set("style_version", String(STYLE_VERSION))
   if (meta?.provider)
     set(
       "compiled_by",
@@ -178,21 +180,3 @@ export function readDocFile(docPath: string): string {
   }
 }
 
-export function parseHealthResponse(raw: string): {
-  healthy: boolean
-  issues: string[]
-} {
-  try {
-    const cleaned = raw
-      .replace(/```json?\s*/g, "")
-      .replace(/```/g, "")
-      .trim()
-    const parsed = JSON.parse(cleaned)
-    return {
-      healthy: Boolean(parsed.healthy),
-      issues: Array.isArray(parsed.issues) ? parsed.issues.map(String) : [],
-    }
-  } catch {
-    return { healthy: false, issues: ["Could not parse health check response"] }
-  }
-}

@@ -3,6 +3,7 @@ import type { DocEntry } from "../config"
 import { SOURCE_FILE_CAP, SOURCE_TOTAL_CAP } from "../constants"
 import { listFiles } from "../file-glob"
 import { getDiffForFiles } from "../git"
+import { type InjectionFinding, scanForInjection } from "./injection-scan"
 import { allocateBudget, scoreFiles } from "./scorer"
 
 const TRAILING_GLOB = /[/*]+$/
@@ -67,6 +68,7 @@ export type GatherResult = {
   totalSize: number
   truncatedFiles: string[]
   skippedByPriority: number
+  injectionFindings: InjectionFinding[]
 }
 
 export function gatherFullSource(
@@ -84,6 +86,7 @@ export function gatherFullSource(
       totalSize: 0,
       truncatedFiles: [],
       skippedByPriority: 0,
+      injectionFindings: [],
     }
   }
 
@@ -96,6 +99,7 @@ export function gatherFullSource(
   const chunks: string[] = []
   const files: SourceFile[] = []
   const truncatedFiles: string[] = []
+  const injectionFindings: InjectionFinding[] = []
   let filesRead = 0
   let skipped = 0
 
@@ -121,6 +125,7 @@ export function gatherFullSource(
     if (content.length >= budget && budget < SOURCE_FILE_CAP) {
       truncatedFiles.push(file)
     }
+    injectionFindings.push(...scanForInjection(file, content))
     files.push({ path: file, content })
     const chunk = `--- ${file} ---\n${content}`
     chunks.push(chunk)
@@ -140,5 +145,6 @@ export function gatherFullSource(
     totalSize: total,
     truncatedFiles,
     skippedByPriority: skipped,
+    injectionFindings,
   }
 }

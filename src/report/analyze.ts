@@ -4,6 +4,7 @@ import { join } from "node:path"
 import type { DocMap } from "../config"
 import { listFiles } from "../file-glob"
 import { type Contributor, getDirectoryAuthors } from "../git"
+import { summarizeTelemetry } from "../telemetry/usage"
 import { computeBusFactor, docPathToTitle } from "../utils"
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -54,12 +55,18 @@ export type CoverageGap = {
   suggestedFix: string
 }
 
+export type OrphanedDoc = {
+  docPath: string
+  sources: string[]
+}
+
 export type ReportData = {
   generatedAt: string
   modules: ModuleAnalysis[]
   team: TeamMember[]
   recentDecisions: DecisionInfo[]
   coverageGaps: CoverageGap[]
+  orphanedDocs: OrphanedDoc[]
   totals: {
     documentableFiles: number
     compiledPages: number
@@ -111,7 +118,6 @@ type DocDecisions = {
 
 function extractDecisions(
   docContent: string,
-  docPath: string,
   moduleName: string,
 ): DocDecisions {
   const decisions: DecisionInfo[] = []
@@ -258,7 +264,18 @@ function parseCompilationStats(
     const entries = content.split(/^##\s+/m).filter(Boolean)
     const totalCompiles = entries.length
 
-    // No cost data in current log format — leave as placeholder
+    // Enrich with real cost from _telemetry.jsonl when available. Telemetry
+    // counts days with recorded LLM calls as "runs" — close enough to
+    // log.md's compile count for aggregate cost math.
+    const telemetry = summarizeTelemetry(docsDir)
+    if (telemetry && telemetry.runs > 0 && telemetry.costUSD > 0) {
+      return {
+        totalCompiles,
+        averageCost: `$${(telemetry.costUSD / telemetry.runs).toFixed(4)}`,
+        totalCost: `$${telemetry.costUSD.toFixed(2)}`,
+      }
+    }
+
     return {
       totalCompiles,
       averageCost: "—",
@@ -310,6 +327,7 @@ export function analyzeRepository(
   >()
 
   const allDecisions: DecisionInfo[] = []
+  const orphanedDocs: OrphanedDoc[] = []
 
   // Analyze each doc-map entry as a module
   const compiledEntries = Object.entries(docMap.docs).filter(
@@ -318,6 +336,19 @@ export function analyzeRepository(
 
   for (const [docPath, entry] of compiledEntries) {
     if (!entry) continue
+
+    // Orphan detection: doc's declared sources no longer exist on disk.
+    // We check `sources` specifically (not context_files) because sources
+    // are the doc's subject. Only flag when the compiled doc file is still
+    // present — if the doc itself was already removed, it's not "orphaned".
+    const fullDocPath = join(docsDir, docPath)
+    if (existsSync(fullDocPath) && entry.sources.length > 0) {
+      const matchedSources = listFiles(entry.sources, repoRoot)
+      if (matchedSources.length === 0) {
+        orphanedDocs.push({ docPath, sources: entry.sources })
+        continue
+      }
+    }
 
     const moduleName = docPathToTitle(docPath)
     const contributors = getDirectoryAuthors(entry.sources, repoRoot)
@@ -342,7 +373,6 @@ export function analyzeRepository(
         : ""
 
     // Read compiled doc for decision analysis
-    const fullDocPath = join(docsDir, docPath)
     let docDecisions: DocDecisions = {
       decisions: [],
       adrsLinked: 0,
@@ -351,7 +381,7 @@ export function analyzeRepository(
 
     if (existsSync(fullDocPath)) {
       const docContent = readFileSync(fullDocPath, "utf-8")
-      docDecisions = extractDecisions(docContent, docPath, moduleName)
+      docDecisions = extractDecisions(docContent, moduleName)
     }
 
     const decisionCount = docDecisions.decisions.length
@@ -491,6 +521,7 @@ export function analyzeRepository(
     team,
     recentDecisions,
     coverageGaps,
+    orphanedDocs,
     totals: {
       documentableFiles,
       compiledPages: compiledEntries.length,

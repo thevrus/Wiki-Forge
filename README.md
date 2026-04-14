@@ -150,6 +150,33 @@ Claude gets four tools:
 
 No LLM calls, no database, no accounts. The MCP server reads markdown files — the compiled wiki is the product, the server is just the read layer. Works across all Claude surfaces: Claude Code, Cowork, Desktop.
 
+### 4. CLI (standalone)
+
+```bash
+npx wiki-forge init --provider gemini          # LLM analyzes your codebase, suggests docs
+npx wiki-forge init --provider ollama          # or use a local model
+npx wiki-forge init                            # pattern-based (no LLM needed)
+```
+
+Then compile:
+
+```bash
+npx wiki-forge compile --provider gemini --force    # full compile from scratch
+npx wiki-forge compile --provider gemini            # incremental — only drifted docs
+npx wiki-forge check --provider gemini              # see what drifted, no writes
+npx wiki-forge status                               # drift dashboard (no LLM, no writes)
+npx wiki-forge report --provider gemini             # brain health report
+npx wiki-forge report --provider gemini --weekly    # weekly shipping brief
+```
+
+Or just run the interactive wizard:
+
+```bash
+npx wiki-forge
+```
+
+Works with any LLM: `--provider gemini|claude|openai|ollama|local`. See [Configuration & CLI reference](./CONFIGURATION.md) for all flags.
+
 ---
 
 ## What it produces

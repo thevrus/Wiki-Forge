@@ -190,7 +190,9 @@ const main = defineCommand({
   },
   subCommands: {
     init: defineCommand({
-      meta: { description: "Scaffold .doc-map.json (uses LLM when --provider given)" },
+      meta: {
+        description: "Scaffold .doc-map.json (uses LLM when --provider given)",
+      },
       args: {
         repo: repoArg,
         "docs-dir": docsDirArg,
@@ -215,7 +217,9 @@ const main = defineCommand({
         } else if (args.provider) {
           const providerName = args.provider as ProviderConfig["provider"]
           const needsKey = !["local", "ollama"].includes(providerName)
-          const apiKey = needsKey ? resolveApiKey(providerName, args["api-key"]) : ""
+          const apiKey = needsKey
+            ? resolveApiKey(providerName, args["api-key"])
+            : ""
           const { createProviders } = await import("./providers")
           const providers = createProviders({
             provider: providerName,
@@ -555,6 +559,85 @@ const main = defineCommand({
         }
 
         log.outro("")
+      },
+    }),
+
+    eval: defineCommand({
+      meta: {
+        description:
+          "Score compiled wiki against question/answer fixtures in wiki/_eval/*.json",
+      },
+      args: llmArgs,
+      run: async ({ args }) => {
+        const provider = args.provider
+        const resolvedKey =
+          provider === "local" || provider === "ollama"
+            ? ""
+            : resolveApiKey(provider, args["api-key"])
+
+        const { resolveConfig } = await import("./config")
+        const { createProviders } = await import("./providers")
+        const { runEval } = await import("./eval")
+
+        const config = resolveConfig(
+          args.repo,
+          args["docs-dir"] ? `${args.repo}/${args["docs-dir"]}` : undefined,
+        )
+        const providers = createProviders({
+          provider: provider as ProviderConfig["provider"],
+          apiKey: resolvedKey,
+          localCmd: args["local-cmd"],
+          triageModel: args["ollama-model"],
+          compileModel: args["ollama-model"],
+          ollamaUrl: args["ollama-url"],
+        })
+
+        log.intro("wiki-forge eval")
+        log.keyValue({
+          provider,
+          repo: args.repo,
+          docs: config.docsDir,
+        })
+
+        const spinner = log.spin("Running eval fixtures...")
+        try {
+          const summary = await runEval(
+            config.docsDir,
+            providers.compile,
+            providers.triage,
+            {},
+            (done, total, id) => {
+              spinner.text = `[${done}/${total}] ${id}`
+            },
+          )
+          spinner.stop()
+
+          if (summary.total === 0) {
+            log.warn(
+              `No fixtures found in ${summary.fixturesDir}. Create JSON files with [{ "question": "...", "expected_facts": ["..."] }].`,
+            )
+            log.outro("")
+            return
+          }
+
+          log.success(summary.outputPath)
+          const pct = Math.round((summary.passed / summary.total) * 100)
+          log.summary([
+            `Avg score: ${summary.averageScore.toFixed(2)} / 1.00`,
+            `Passed:    ${summary.passed} / ${summary.total} (${pct}%)`,
+            `Calls:     ${summary.cost.calls}`,
+            `Tokens:    ${summary.cost.inputTokens.toLocaleString()} in / ${summary.cost.outputTokens.toLocaleString()} out`,
+            summary.cost.costUSD > 0
+              ? `Cost:      $${summary.cost.costUSD.toFixed(4)}`
+              : `Cost:      (free/unknown)`,
+          ])
+          log.outro("")
+        } catch (err) {
+          spinner.stop()
+          const message = err instanceof Error ? err.message : String(err)
+          log.error(message)
+          process.exit(1)
+        }
       },
     }),
 

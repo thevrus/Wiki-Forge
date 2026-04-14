@@ -1,7 +1,11 @@
 import { statSync } from "node:fs"
 import { join } from "node:path"
 import fg from "fast-glob"
-import { BINARY_EXTENSIONS, EXCLUDED_PATTERNS, SOURCE_EXTENSIONS } from "./constants"
+import {
+  BINARY_EXTENSIONS,
+  EXCLUDED_PATTERNS,
+  SOURCE_EXTENSIONS,
+} from "./constants"
 
 const GLOB_IGNORE = EXCLUDED_PATTERNS.map((p) => `**/*${p}*/**`)
 const EXT_GLOB = `*.{${SOURCE_EXTENSIONS.join(",")}}`
@@ -90,6 +94,22 @@ export function listAllTextFiles(patterns: string[], cwd: string): string[] {
       const ext = f.slice(f.lastIndexOf(".") + 1).toLowerCase()
       return ext !== f && !BINARY_EXTENSIONS.has(ext)
     })
+    .sort()
+}
+
+/**
+ * List all .md files under a directory, skipping system entries (`.*`, `_*`).
+ * Used by the eval harness to index compiled docs.
+ */
+export function listMarkdownFiles(docsDir: string): string[] {
+  return fg
+    .sync("**/*.md", {
+      cwd: docsDir,
+      ignore: ["_*/**", ".*/**", "**/.*/**"],
+      dot: false,
+      onlyFiles: true,
+    })
+    .filter((p) => !p.split("/").some((seg) => seg.startsWith("_")))
     .sort()
 }
 

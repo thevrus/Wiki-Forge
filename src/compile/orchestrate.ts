@@ -15,6 +15,7 @@ import { createProviders } from "../providers"
 import type { ProviderConfig } from "../providers/types"
 import { analyzeRepository } from "../report/analyze"
 import { generateStatusReport } from "../report/status"
+import { flushTelemetry } from "../telemetry/usage"
 import { verifyDocClaims } from "../validation/claims"
 import { validateCompiledOutput } from "../validation/output"
 import { buildDependencyGraph } from "./dependency-graph"
@@ -27,7 +28,8 @@ import {
   updateHashesForDoc,
 } from "./hashes"
 import { generateIndex, generateLlmsTxt } from "./indexer"
-import { asyncPool, DEFAULT_STYLE, noSourcesMessage } from "./prompts"
+import { DEFAULT_STYLE, noSourcesMessage } from "./prompts"
+import { asyncPool } from "../utils"
 import { gatherFullSource } from "./sources"
 import {
   gatherDetail,
@@ -75,8 +77,12 @@ export async function orchestrate(
   const onSigint = () => {
     console.log("\n\n  Interrupted. Saving progress...")
     try {
-      saveHashes(resolveConfig(repoRoot, docsDir).docsDir, allHashesRef)
-    } catch { /* best effort */ }
+      const docsDirResolved = resolveConfig(repoRoot, docsDir).docsDir
+      saveHashes(docsDirResolved, allHashesRef)
+      flushTelemetry(docsDirResolved)
+    } catch {
+      /* best effort */
+    }
     console.log("  Already-compiled docs are saved.\n")
     process.exit(130)
   }
@@ -360,6 +366,7 @@ export async function orchestrate(
       } else {
         handle.succeed(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
         log.gatherWarnings(gather.truncatedFiles)
+        log.injectionWarnings(gather.injectionFindings)
         if (validation.warnings.length > 0) {
           for (const w of validation.warnings) log.warn(w)
         }
@@ -542,6 +549,7 @@ export async function orchestrate(
       } else {
         handle.succeed(`${docPath} ${pc.dim(`(${elapsed}s)`)}`)
         log.gatherWarnings(gather.truncatedFiles)
+        log.injectionWarnings(gather.injectionFindings)
         if (validation.warnings.length > 0) {
           for (const w of validation.warnings) log.warn(w)
         }
@@ -626,6 +634,21 @@ export async function orchestrate(
       log.success("_status.md")
     } catch {
       log.warn("_status.md generation failed")
+    }
+  }
+
+  // Flush LLM telemetry to _telemetry.jsonl and print a one-line summary.
+  // Happens for both compile and health modes so any LLM call is recorded.
+  if (mode !== "check") {
+    const summary = flushTelemetry(config.docsDir)
+    if (summary.calls > 0) {
+      const cost =
+        summary.costUSD > 0
+          ? ` · ${pc.dim(`$${summary.costUSD.toFixed(4)}`)}`
+          : ""
+      log.info(
+        `${summary.calls} LLM calls · ${summary.inputTokens.toLocaleString()} in / ${summary.outputTokens.toLocaleString()} out${cost}`,
+      )
     }
   }
 

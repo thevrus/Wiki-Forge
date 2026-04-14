@@ -7,7 +7,9 @@ import {
 } from "../git"
 import { type DocContext, formatDocContextForPrompt } from "../ingestion"
 import * as log from "../logger"
+import { tryGenerateJSON } from "../providers/json"
 import type { LLMProvider } from "../providers/types"
+import { HealthResponseSchema } from "../schemas"
 import { stripCodeFences } from "../validation/output"
 import {
   buildDependencyGraph,
@@ -18,12 +20,10 @@ import {
   formatTicketContext,
   injectContributorsFrontmatter,
   injectTicketsFrontmatter,
-  parseHealthResponse,
 } from "./frontmatter"
 import {
   fullRecompilePrompt,
   fullRecompileSystem,
-  HEALTH_CHECK_FORMAT,
   healthCheckPrompt,
   recompilePrompt,
   singlePassPrompt,
@@ -172,9 +172,13 @@ export async function runHealthCheck(
     return [noSourcesMessage(entry)]
   }
   const prompt = healthCheckPrompt(entry, currentDoc, gather.content, domain)
-  const raw = await triageProvider.generate(prompt, undefined, {
-    format: HEALTH_CHECK_FORMAT,
-  })
-  const { healthy, issues } = parseHealthResponse(raw)
-  return healthy ? [] : issues
+  const parsed = await tryGenerateJSON(
+    triageProvider,
+    HealthResponseSchema,
+    prompt,
+  )
+  if (!parsed) {
+    return ["Could not parse health check response"]
+  }
+  return parsed.healthy ? [] : parsed.issues
 }

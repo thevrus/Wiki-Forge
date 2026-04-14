@@ -47,9 +47,7 @@ export function stripDuplicateFrontmatter(doc: string): string {
   }
 
   // Pattern 2: bare second ---\n...\n--- immediately after first frontmatter
-  const bareFm = bodyStart.match(
-    /^---\n[\s\S]*?\n---\s*\n([\s\S]*)$/,
-  )
+  const bareFm = bodyStart.match(/^---\n[\s\S]*?\n---\s*\n([\s\S]*)$/)
   if (bareFm) {
     // Verify it looks like frontmatter (has key: value lines)
     const secondBlock = bodyStart.slice(3, bodyStart.indexOf("---", 3))

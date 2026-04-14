@@ -395,3 +395,29 @@ export function gatherWarnings(truncatedFiles: string[]): void {
     )
   }
 }
+
+/** Print prompt-injection findings from source scan — call AFTER spinner stops */
+export function injectionWarnings(
+  findings: Array<{
+    file: string
+    pattern: string
+    line: number
+    snippet: string
+  }>,
+): void {
+  if (findings.length === 0) return
+  const byFile = new Map<string, string[]>()
+  for (const f of findings) {
+    const entry = byFile.get(f.file) ?? []
+    entry.push(`${f.pattern}@${f.line}`)
+    byFile.set(f.file, entry)
+  }
+  const summary = [...byFile.entries()]
+    .slice(0, 3)
+    .map(([file, patterns]) => `${file} (${patterns.join(", ")})`)
+    .join("; ")
+  const more = byFile.size > 3 ? ` and ${byFile.size - 3} more` : ""
+  warn(
+    `${pc.yellow("⚠")} prompt-injection patterns in ${findings.length} location(s): ${pc.dim(summary)}${more}`,
+  )
+}

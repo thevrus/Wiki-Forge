@@ -1,6 +1,12 @@
+export type ProviderRole = "triage" | "compile"
+
 export type GenerateOptions = {
-  /** JSON schema for Ollama structured outputs. Forces model to return valid JSON matching the schema. */
-  format?: Record<string, unknown>
+  /** JSON Schema for structured output. Each provider translates to its native
+   * equivalent: Claude tool-use, OpenAI response_format, Gemini responseSchema,
+   * Ollama format. The response text is guaranteed to be JSON-parseable (or
+   * the provider will throw). Does not guarantee Zod schema conformance —
+   * callers should still validate with Zod. */
+  jsonSchema?: Record<string, unknown>
 }
 
 export type LLMProvider = {

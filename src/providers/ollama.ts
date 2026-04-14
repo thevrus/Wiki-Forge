@@ -4,7 +4,8 @@ import {
   LLM_TEMPERATURE,
   OLLAMA_TIMEOUT_MINUTES,
 } from "../constants"
-import type { LLMProvider, ProviderConfig } from "./types"
+import { recordUsage } from "../telemetry/usage"
+import type { LLMProvider, ProviderConfig, ProviderRole } from "./types"
 
 const DEFAULT_BASE_URL = "http://localhost:11434"
 const TIMEOUT_MS = OLLAMA_TIMEOUT_MINUTES * 60 * 1000
@@ -26,8 +27,12 @@ export function createOllamaProvider(config: ProviderConfig): {
 } {
   const baseUrl = config.ollamaUrl ?? DEFAULT_BASE_URL
 
-  const createProvider = (model: string): LLMProvider => ({
+  const createProvider = (
+    model: string,
+    role: ProviderRole,
+  ): LLMProvider => ({
     async generate(prompt, system, options) {
+      const start = Date.now()
       const url = new URL(`${baseUrl}/api/chat`)
       const body = JSON.stringify({
         model,
@@ -37,12 +42,32 @@ export function createOllamaProvider(config: ProviderConfig): {
           temperature: LLM_TEMPERATURE,
           num_ctx: adaptiveNumCtx(prompt, system),
         },
-        ...(options?.format ? { format: options.format } : {}),
+        ...(options?.jsonSchema ? { format: options.jsonSchema } : {}),
         messages: [
           ...(system ? [{ role: "system", content: system }] : []),
           { role: "user", content: prompt },
         ],
       })
+
+      let promptEvalCount = 0
+      let evalCount = 0
+
+      const consumeLine = (line: string, chunks: string[]): void => {
+        if (!line.trim()) return
+        try {
+          const obj = JSON.parse(line) as {
+            message?: { content?: string }
+            prompt_eval_count?: number
+            eval_count?: number
+          }
+          if (obj.message?.content) chunks.push(obj.message.content)
+          if (typeof obj.prompt_eval_count === "number")
+            promptEvalCount = obj.prompt_eval_count
+          if (typeof obj.eval_count === "number") evalCount = obj.eval_count
+        } catch {
+          // malformed line — skip
+        }
+      }
 
       return new Promise<string>((resolve, reject) => {
         const req = http.request(
@@ -71,30 +96,19 @@ export function createOllamaProvider(config: ProviderConfig): {
               buffer += chunk.toString()
               const lines = buffer.split("\n")
               buffer = lines.pop()! // keep incomplete trailing line
-              for (const line of lines) {
-                if (!line.trim()) continue
-                try {
-                  const obj = JSON.parse(line) as {
-                    message?: { content?: string }
-                  }
-                  if (obj.message?.content) chunks.push(obj.message.content)
-                } catch {
-                  // malformed line — skip
-                }
-              }
+              for (const line of lines) consumeLine(line, chunks)
             })
 
             res.on("end", () => {
-              if (buffer.trim()) {
-                try {
-                  const obj = JSON.parse(buffer) as {
-                    message?: { content?: string }
-                  }
-                  if (obj.message?.content) chunks.push(obj.message.content)
-                } catch {
-                  // ignore
-                }
-              }
+              if (buffer) consumeLine(buffer, chunks)
+              recordUsage({
+                provider: "ollama",
+                model,
+                role,
+                inputTokens: promptEvalCount,
+                outputTokens: evalCount,
+                durationMs: Date.now() - start,
+              })
               resolve(chunks.join(""))
             })
 
@@ -120,7 +134,7 @@ export function createOllamaProvider(config: ProviderConfig): {
   })
 
   return {
-    triage: createProvider(config.triageModel ?? "llama3.1"),
-    compile: createProvider(config.compileModel ?? "llama3.1"),
+    triage: createProvider(config.triageModel ?? "llama3.1", "triage"),
+    compile: createProvider(config.compileModel ?? "llama3.1", "compile"),
   }
 }

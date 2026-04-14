@@ -4,7 +4,11 @@ import { asyncPool } from "../utils"
 import { hashContent } from "./hashes"
 import type { SummaryCache } from "./summary-cache"
 
-export { asyncPool }
+// ── Prompt version ────────────────────────────────────────────────────
+// Bump when DEFAULT_STYLE or ONE_SHOT_EXAMPLE change in a way that affects
+// output shape. Recorded in compiled doc frontmatter so we can A/B test
+// prompt changes and identify docs generated with stale prompts.
+export const STYLE_VERSION = 1
 
 // ── One-shot example ──────────────────────────────────────────────────
 
@@ -17,6 +21,7 @@ slug: booking-system
 category: compiled
 description: "Appointment scheduling, availability checks, and cancellation rules"
 compiled_at: "2026-04-07T00:00:00Z"
+style_version: 1
 ---
 
 The booking system handles appointment scheduling for pet grooming and veterinary services. Customers select a service, pick an available time slot, and confirm the booking. Staff can view and manage appointments through an admin dashboard.
@@ -409,16 +414,6 @@ export function fullRecompilePrompt(
     "",
     "Now write the complete knowledge base document. Start with the --- frontmatter block.",
   ].join("\n")
-}
-
-/** JSON schema for Ollama structured output on health checks. */
-export const HEALTH_CHECK_FORMAT = {
-  type: "object",
-  properties: {
-    healthy: { type: "boolean" },
-    issues: { type: "array", items: { type: "string" } },
-  },
-  required: ["healthy", "issues"],
 }
 
 export function healthCheckPrompt(
