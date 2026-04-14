@@ -594,14 +594,14 @@ export async function runSmartInit(
     })
     treeStr = filtered.slice(0, 2000).join("\n")
   } else {
-    // Large project: top dirs by size only — keeps prompt small for local models
+    // Large project: top 60 dirs by size — keeps prompt under ~4K tokens for local models
     const ranked = dirStats
       .map((s) => {
         const kbMatch = s.match(/(\d+)KB\)$/)
         return { line: s, kb: kbMatch ? Number(kbMatch[1]) : 0 }
       })
       .sort((a, b) => b.kb - a.kb)
-      .slice(0, 150)
+      .slice(0, 60)
     treeStr = ranked.map((d) => d.line).join("\n")
   }
 
@@ -692,11 +692,15 @@ Format: { "docs": { "NAME.md": { "description": "...", "type": "compiled", "sour
     .join("\n")
 
   try {
-    const result = await tryGenerateJSON(provider, SmartInitSchema, prompt, system)
+    // 3-minute wall-clock timeout for init — local models can hang on large prompts
+    const INIT_TIMEOUT_MS = 3 * 60 * 1000
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), INIT_TIMEOUT_MS))
+    const generate = tryGenerateJSON(provider, SmartInitSchema, prompt, system)
+    const result = await Promise.race([generate, timeout])
     spinner.stop()
 
     if (!result || Object.keys(result.docs).length === 0) {
-      log.warn("LLM could not generate doc-map (model may not support structured output or context was too large)")
+      log.warn("LLM could not generate doc-map (timed out or context too large)")
       log.warn("Falling back to pattern-based init")
       await runInit(repo, customDocsDir)
       return
