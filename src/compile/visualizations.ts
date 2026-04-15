@@ -10,9 +10,12 @@ function quarterLabel(date: string): string {
   return `${year} Q${q}`
 }
 
+const TICKET_RE = /\b[A-Z][A-Z0-9]+-\d+\b|\(#\d+\)/
+
 export function decisionTimeline(ctx: DocContext, docName: string): string {
   const events: Array<{ date: string; label: string; source: string }> = []
 
+  // PRs are always decisions
   for (const pr of ctx.pullRequests) {
     const commit = ctx.files
       .flatMap((f) => f.commits)
@@ -23,20 +26,21 @@ export function decisionTimeline(ctx: DocContext, docName: string): string {
       pr.linkedTickets.length > 0 ? ` [${pr.linkedTickets.join(", ")}]` : ""
     events.push({
       date,
-      label: pr.title.slice(0, 60),
+      label: pr.title.slice(0, 40),
       source: `PR #${pr.number}${tickets}`,
     })
   }
 
-  // Also include commits with meaningful messages that aren't PR-linked
+  // Only include non-PR commits that reference a ticket or are feat/fix
   for (const file of ctx.files) {
     for (const c of file.commits) {
-      if (c.prNumber) continue // already covered by PR
-      if (c.message.length < 15) continue
-      if (/^(chore|style|ci|docs|build):/i.test(c.message)) continue
+      if (c.prNumber) continue
+      const hasTicket = TICKET_RE.test(c.message)
+      const isMeaningful = /^(feat|fix|refactor|perf|breaking):/i.test(c.message)
+      if (!hasTicket && !isMeaningful) continue
       events.push({
         date: c.date,
-        label: c.message.slice(0, 60),
+        label: c.message.slice(0, 40),
         source: c.sha.slice(0, 7),
       })
     }
@@ -44,15 +48,17 @@ export function decisionTimeline(ctx: DocContext, docName: string): string {
 
   if (events.length < 2) return ""
 
-  // Deduplicate and sort
+  // Deduplicate, sort, and cap at 20 total
   const seen = new Set<string>()
-  const unique = events.filter((e) => {
-    const key = e.source
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-  unique.sort((a, b) => a.date.localeCompare(b.date))
+  const unique = events
+    .filter((e) => {
+      const key = e.source
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-20) // keep most recent 20
 
   // Group by quarter
   const quarters = new Map<string, typeof unique>()
@@ -61,6 +67,10 @@ export function decisionTimeline(ctx: DocContext, docName: string): string {
     if (!quarters.has(q)) quarters.set(q, [])
     quarters.get(q)!.push(e)
   }
+
+  // Sanitize labels for Mermaid (no colons, quotes, or special chars)
+  const sanitize = (s: string) =>
+    s.replace(/[:"'`{}|#<>]/g, "").replace(/\s+/g, " ").trim()
 
   const slug = docName.replace(/\.md$/i, "").toLowerCase()
   const lines = [
@@ -74,8 +84,8 @@ export function decisionTimeline(ctx: DocContext, docName: string): string {
 
   for (const [quarter, items] of quarters) {
     lines.push(`    section ${quarter}`)
-    for (const item of items.slice(0, 4)) {
-      lines.push(`        ${item.label} : ${item.source}`)
+    for (const item of items.slice(0, 3)) {
+      lines.push(`        ${sanitize(item.label)} : ${item.source}`)
     }
   }
 
